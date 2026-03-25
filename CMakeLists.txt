@@ -15,6 +15,7 @@ if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(angles REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
@@ -41,6 +42,14 @@ find_package(GeographicLib REQUIRED)
 set(library_name rl_lib)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/BranchStatusSnapshot.msg"
+  "msg/ComponentStatusSnapshot.msg"
+  "msg/FilterStateDiagnostic.msg"
+  "msg/InnovationDiagnostic.msg"
+  "msg/StreamBranchStatus.msg"
+  "msg/StreamComponentStatus.msg"
+  "msg/StreamTelemetry.msg"
+  "msg/TelemetrySnapshot.msg"
   "srv/FromLL.srv"
   "srv/GetState.srv"
   "srv/SetDatum.srv"
@@ -105,6 +114,7 @@ target_link_libraries(
 
 ament_target_dependencies(
   ${library_name}
+  ament_index_cpp
   angles
   diagnostic_msgs
   diagnostic_updater
@@ -335,6 +345,12 @@ install(TARGETS ${library_name}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
+)
+
+install(
+  PROGRAMS
+    scripts/ekf_tuning_visualizer.py
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 install(DIRECTORY

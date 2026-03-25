@@ -33,6 +33,7 @@
 
 #include <Eigen/Dense>
 #include <angles/angles.h>
+#include <cmath>
 #include <vector>
 #include <robot_localization/ekf.hpp>
 #include <robot_localization/filter_common.hpp>
@@ -165,9 +166,10 @@ void Ekf::correct(const Measurement & measurement)
   // (1) Compute the Kalman gain: K = (PH') / (HPH' + R)
   Eigen::MatrixXd pht =
     estimate_error_covariance_ * state_to_measurement_subset.transpose();
+  Eigen::MatrixXd innovation_covariance_subset =
+    state_to_measurement_subset * pht + measurement_covariance_subset;
   Eigen::MatrixXd hphr_inverse =
-    (state_to_measurement_subset * pht + measurement_covariance_subset)
-    .inverse();
+    innovation_covariance_subset.inverse();
   kalman_gain_subset.noalias() = pht * hphr_inverse;
 
   innovation_subset = (measurement_subset - state_subset);
@@ -183,9 +185,36 @@ void Ekf::correct(const Measurement & measurement)
   }
 
   // (2) Check Mahalanobis distance between mapped measurement and state.
-  if (checkMahalanobisThreshold(
-      innovation_subset, hphr_inverse,
-      measurement.mahalanobis_thresh_))
+  double squared_mahalanobis = 0.0;
+  const bool mahalanobis_passed = checkMahalanobisThreshold(
+    innovation_subset, hphr_inverse,
+    measurement.mahalanobis_thresh_, &squared_mahalanobis);
+  const double mahalanobis_distance =
+    std::sqrt(squared_mahalanobis > 0.0 ? squared_mahalanobis : 0.0);
+  reportMahalanobisResult(
+    measurement.topic_name_,
+    mahalanobis_distance,
+    measurement.mahalanobis_thresh_,
+    mahalanobis_passed,
+    measurement.time_);
+
+  InnovationResult innovation_result;
+  innovation_result.topic_name_ = measurement.topic_name_;
+  innovation_result.measurement_time_ = measurement.time_;
+  innovation_result.state_indices_ = update_indices;
+  innovation_result.measurement_ = measurement_subset;
+  innovation_result.predicted_measurement_ = state_subset;
+  innovation_result.innovation_ = innovation_subset;
+  innovation_result.measurement_covariance_diagonal_ =
+    measurement_covariance_subset.diagonal();
+  innovation_result.innovation_covariance_diagonal_ =
+    innovation_covariance_subset.diagonal();
+  innovation_result.mahalanobis_distance_ = mahalanobis_distance;
+  innovation_result.mahalanobis_threshold_ = measurement.mahalanobis_thresh_;
+  innovation_result.passed_ = mahalanobis_passed;
+  reportInnovationResult(innovation_result);
+
+  if (mahalanobis_passed)
   {
     // (3) Apply the gain to the difference between the state and measurement: x
     // = x + K(z - Hx)

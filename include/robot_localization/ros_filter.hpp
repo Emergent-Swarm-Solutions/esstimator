@@ -60,6 +60,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
+#include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_srvs/srv/empty.hpp>
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
@@ -67,6 +68,11 @@
 #include <diagnostic_updater/publisher.hpp>
 #include <robot_localization/filter_base.hpp>
 #include <robot_localization/filter_common.hpp>
+#include <robot_localization/msg/branch_status_snapshot.hpp>
+#include <robot_localization/msg/component_status_snapshot.hpp>
+#include <robot_localization/msg/filter_state_diagnostic.hpp>
+#include <robot_localization/msg/innovation_diagnostic.hpp>
+#include <robot_localization/msg/telemetry_snapshot.hpp>
 #include <robot_localization/ros_filter_utilities.hpp>
 
 namespace robot_localization
@@ -96,6 +102,24 @@ using MeasurementQueue =
     Measurement>;
 using MeasurementHistoryDeque = std::deque<MeasurementPtr>;
 using FilterStateHistoryDeque = std::deque<FilterStatePtr>;
+
+struct MahalanobisStreamData
+{
+  double latest_distance_;
+  double latest_threshold_;
+  bool has_value_;
+  bool latest_passed_;
+  std::string source_topic_;
+  std::vector<size_t> configured_state_indices_;
+  rclcpp::Time latest_measurement_time_;
+  double latest_innovation_norm_;
+  std::vector<size_t> latest_state_indices_;
+  std::vector<std::string> latest_state_labels_;
+  std::vector<std::string> latest_component_units_;
+  std::vector<double> latest_component_gate_metrics_;
+  std::vector<double> latest_component_innovations_;
+  std::vector<bool> latest_component_fused_;
+};
 
 template<class T>
 class RosFilter : public rclcpp::Node
@@ -354,6 +378,64 @@ protected:
   //!
   void clearMeasurementQueue();
 
+  //! @brief Handles Mahalanobis test results from the filter core.
+  //!
+  //! @param[in] stream_name - Name of the input stream.
+  //! @param[in] mahalanobis_distance - The Mahalanobis distance.
+  //! @param[in] mahalanobis_threshold - The configured stream threshold.
+  //! @param[in] passed - Whether the test passed.
+  //! @param[in] measurement_time - Timestamp of processed measurement.
+  //!
+  void handleMahalanobisResult(
+    const std::string & stream_name,
+    const double mahalanobis_distance,
+    const double mahalanobis_threshold,
+    const bool passed,
+    const rclcpp::Time & measurement_time);
+
+  //! @brief Handles detailed innovation diagnostics from the filter core.
+  //! @param[in] result - Innovation diagnostics for a processed measurement.
+  void handleInnovationResult(const FilterBase::InnovationResult & result);
+
+  //! @brief Registers a stream for Mahalanobis publishing.
+  //! @param[in] stream_name - Name of the input stream.
+  //! @param[in] source_topic - ROS topic feeding the stream, if known.
+  //! @param[in] update_vector - Enabled state components for the stream, if known.
+  //!
+  void registerMahalanobisStream(
+    const std::string & stream_name,
+    const std::string & source_topic = std::string(),
+    const std::vector<bool> * update_vector = nullptr);
+
+  //! @brief Publishes the most recent Mahalanobis values for all streams.
+  //!
+  void publishAllMahalanobisDistances();
+
+  //! @brief Publishes a Mahalanobis value for one stream.
+  //! @param[in] stream_name - Name of the input stream.
+  //! @param[in] mahalanobis_distance - The Mahalanobis distance value.
+  //!
+  void publishMahalanobisDistance(
+    const std::string & stream_name,
+    const double mahalanobis_distance);
+
+  //! @brief Publishes a snapshot of the filter state and covariance diagonals.
+  //! @param[in] stamp - Timestamp to stamp on the diagnostic message.
+  void publishFilterStateDiagnostic(const rclcpp::Time & stamp);
+
+  //! @brief Publishes periodic branch and component tuning telemetry snapshots.
+  //! @param[in] stamp - Timestamp for the published snapshots.
+  void publishTelemetrySnapshots(const rclcpp::Time & stamp);
+
+  //! @brief Publishes the list of configured input streams for the visualizer.
+  void publishConfiguredStreams();
+
+  //! @brief Starts the tuning visualizer child process if enabled and possible.
+  void startTuningVisualizerIfRequested();
+
+  //! @brief Stops the tuning visualizer child process if running.
+  void stopTuningVisualizer();
+
   //! @brief Adds a diagnostic message to the accumulating map and updates the
   //! error level
   //! @param[in] error_level - The error level of the diagnostic
@@ -550,6 +632,26 @@ protected:
   //!
   double gravitational_acceleration_;
 
+  //! @brief Periodic Mahalanobis publish rate (Hz). <= 0 disables periodic output.
+  //!
+  double mahalanobis_publish_rate_;
+
+  //! @brief Enables periodic publishing of baggable tuning telemetry.
+  //!
+  bool tuning_telemetry_enabled_;
+
+  //! @brief Enables publishing tuning diagnostics and auto-starting the visualizer.
+  //!
+  bool tuning_visualizer_enabled_;
+
+  //! @brief Periodic publish rate for tuning telemetry snapshots.
+  //!
+  double tuning_telemetry_publish_rate_;
+
+  //! @brief Rolling history duration, in seconds, for the tuning visualizer window.
+  //!
+  double tuning_visualizer_history_seconds_;
+
   //! @brief The depth of the history we track for smoothing/delayed measurement
   //! processing
   //!
@@ -607,6 +709,14 @@ protected:
   //!
   rclcpp::Time last_published_stamp_;
 
+  //! @brief The time Mahalanobis values were last published periodically.
+  //!
+  rclcpp::Time last_mahalanobis_publish_time_;
+
+  //! @brief The time tuning telemetry snapshots were last published.
+  //!
+  rclcpp::Time last_tuning_telemetry_publish_time_;
+
   //! @brief We process measurements by queueing them up in
   //! callbacks and processing them all at once within each
   //! iteration
@@ -659,6 +769,27 @@ protected:
   //! remove acceleration due to gravity
   //!
   std::map<std::string, bool> remove_gravitational_acceleration_;
+
+  //! @brief Periodic Mahalanobis publish period.
+  //!
+  rclcpp::Duration mahalanobis_publish_period_;
+
+  //! @brief Periodic tuning telemetry publish period.
+  //!
+  rclcpp::Duration tuning_telemetry_publish_period_;
+
+  //! @brief Process identifier for the auto-started tuning visualizer.
+  //!
+  int tuning_visualizer_pid_;
+
+  //! @brief Last Mahalanobis value for each configured stream.
+  //!
+  std::map<std::string, MahalanobisStreamData> mahalanobis_stream_data_;
+
+  //! @brief Per-stream Mahalanobis publishers.
+  //!
+  std::map<std::string, rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr>
+    mahalanobis_publishers_;
 
   //! @brief An implicitly time ordered queue of past filter states used for
   //! smoothing.
@@ -778,6 +909,35 @@ protected:
   //!
   rclcpp::Publisher<geometry_msgs::msg::AccelWithCovarianceStamped>::SharedPtr
     accel_pub_;
+
+  //! @brief Publisher for per-measurement innovation diagnostics.
+  //!
+  rclcpp::Publisher<robot_localization::msg::InnovationDiagnostic>::SharedPtr
+    tuning_innovation_pub_;
+
+  //! @brief Publisher for periodic filter state diagnostics.
+  //!
+  rclcpp::Publisher<robot_localization::msg::FilterStateDiagnostic>::SharedPtr
+    tuning_filter_state_pub_;
+
+  //! @brief Publisher for the configured stream list used by the visualizer UI.
+  //!
+  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr tuning_streams_pub_;
+
+  //! @brief Publisher for periodic stream telemetry snapshots.
+  //!
+  rclcpp::Publisher<robot_localization::msg::TelemetrySnapshot>::SharedPtr
+    tuning_telemetry_pub_;
+
+  //! @brief Publisher for periodic branch fused/not-fused status snapshots.
+  //!
+  rclcpp::Publisher<robot_localization::msg::BranchStatusSnapshot>::SharedPtr
+    tuning_branch_status_pub_;
+
+  //! @brief Publisher for periodic component fused/not-fused status snapshots.
+  //!
+  rclcpp::Publisher<robot_localization::msg::ComponentStatusSnapshot>::SharedPtr
+    tuning_component_status_pub_;
 
   //! @brief Our filter (EKF, UKF, etc.)
   //!

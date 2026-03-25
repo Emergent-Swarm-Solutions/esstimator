@@ -32,7 +32,12 @@
 
 #include <rcl/time.h>
 
+#include <ament_index_cpp/get_package_prefix.hpp>
+
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -40,6 +45,13 @@
 #include <utility>
 #include <memory>
 #include <vector>
+
+#ifndef _WIN32
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
 #include <robot_localization/ekf.hpp>
 #include <robot_localization/filter_utilities.hpp>
@@ -56,6 +68,101 @@
 namespace robot_localization
 {
 using namespace std::chrono_literals;
+
+namespace
+{
+template<typename Derived>
+std::vector<double> eigenVectorToStdVector(const Eigen::MatrixBase<Derived> & vector)
+{
+  std::vector<double> values(static_cast<size_t>(vector.size()));
+  for (Eigen::Index index = 0; index < vector.size(); ++index) {
+    values[static_cast<size_t>(index)] = vector(index);
+  }
+  return values;
+}
+
+std::vector<size_t> updateVectorToStateIndices(const std::vector<bool> & update_vector)
+{
+  std::vector<size_t> state_indices;
+  state_indices.reserve(update_vector.size());
+  for (size_t index = 0; index < update_vector.size(); ++index) {
+    if (update_vector[index]) {
+      state_indices.push_back(index);
+    }
+  }
+  return state_indices;
+}
+
+std::string stateIndexShortLabel(const size_t state_index)
+{
+  static const std::vector<std::string> labels{
+    "X", "Y", "Z",
+    "ROLL", "PITCH", "YAW",
+    "VX", "VY", "VZ",
+    "VROLL", "VPITCH", "VYAW",
+    "AX", "AY", "AZ"};
+
+  if (state_index < labels.size()) {
+    return labels[state_index];
+  }
+  return "STATE_" + std::to_string(state_index);
+}
+
+bool stateIndexIsAngular(const size_t state_index)
+{
+  return state_index == StateMemberRoll ||
+         state_index == StateMemberPitch ||
+         state_index == StateMemberYaw ||
+         state_index == StateMemberVroll ||
+         state_index == StateMemberVpitch ||
+         state_index == StateMemberVyaw;
+}
+
+double stateIndexDisplayScale(const size_t state_index)
+{
+  return stateIndexIsAngular(state_index) ? (180.0 / M_PI) : 1.0;
+}
+
+std::string stateIndexDisplayUnit(const size_t state_index)
+{
+  if (state_index == StateMemberRoll ||
+    state_index == StateMemberPitch ||
+    state_index == StateMemberYaw)
+  {
+    return "deg";
+  }
+
+  if (state_index == StateMemberVroll ||
+    state_index == StateMemberVpitch ||
+    state_index == StateMemberVyaw)
+  {
+    return "deg/s";
+  }
+
+  if (state_index == StateMemberX ||
+    state_index == StateMemberY ||
+    state_index == StateMemberZ)
+  {
+    return "m";
+  }
+
+  if (state_index == StateMemberVx ||
+    state_index == StateMemberVy ||
+    state_index == StateMemberVz)
+  {
+    return "m/s";
+  }
+
+  if (state_index == StateMemberAx ||
+    state_index == StateMemberAy ||
+    state_index == StateMemberAz)
+  {
+    return "m/s^2";
+  }
+
+  return "";
+}
+}  // namespace
 
 template<typename T>
 RosFilter<T>::RosFilter(const rclcpp::NodeOptions & options)
@@ -76,10 +183,20 @@ RosFilter<T>::RosFilter(const rclcpp::NodeOptions & options)
   static_diag_error_level_(diagnostic_msgs::msg::DiagnosticStatus::OK),
   frequency_(30.0),
   gravitational_acceleration_(9.80665),
+  mahalanobis_publish_rate_(0.0),
+  tuning_telemetry_enabled_(false),
+  tuning_visualizer_enabled_(false),
+  tuning_telemetry_publish_rate_(5.0),
+  tuning_visualizer_history_seconds_(60.0),
   history_length_(0ns),
   latest_control_(),
   last_diag_time_(0, 0, RCL_ROS_TIME),
   last_published_stamp_(0, 0, RCL_ROS_TIME),
+  last_mahalanobis_publish_time_(0, 0, RCL_ROS_TIME),
+  last_tuning_telemetry_publish_time_(0, 0, RCL_ROS_TIME),
+  mahalanobis_publish_period_(0ns),
+  tuning_telemetry_publish_period_(0ns),
+  tuning_visualizer_pid_(-1),
   predict_to_current_time_(false),
   last_set_pose_time_(0, 0, RCL_ROS_TIME),
   latest_control_time_(0, 0, RCL_ROS_TIME),
@@ -122,6 +239,17 @@ RosFilter<T>::~RosFilter()
   freq_diag_.reset();
   accel_pub_.reset();
   position_pub_.reset();
+  tuning_filter_state_pub_.reset();
+  tuning_innovation_pub_.reset();
+  tuning_streams_pub_.reset();
+  tuning_telemetry_pub_.reset();
+  tuning_branch_status_pub_.reset();
+  tuning_component_status_pub_.reset();
+  mahalanobis_publishers_.clear();
+  mahalanobis_stream_data_.clear();
+  stopTuningVisualizer();
+  filter_.setMahalanobisResultCallback(FilterBase::MahalanobisResultCallback());
+  filter_.setInnovationResultCallback(FilterBase::InnovationResultCallback());
 }
 
 template<typename T>
@@ -143,12 +271,29 @@ void RosFilter<T>::reset()
   last_diag_time_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
   latest_control_time_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
   last_published_stamp_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
+  last_mahalanobis_publish_time_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
+  last_tuning_telemetry_publish_time_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
 
   // clear tf buffer to avoid TF_OLD_DATA errors
   tf_buffer_->clear();
 
   // clear last message timestamp, so older messages will be accepted
   last_message_times_.clear();
+
+  for (auto & stream_data : mahalanobis_stream_data_) {
+    stream_data.second.latest_distance_ = 0.0;
+    stream_data.second.latest_threshold_ = 0.0;
+    stream_data.second.has_value_ = false;
+    stream_data.second.latest_passed_ = true;
+    stream_data.second.latest_measurement_time_ = rclcpp::Time(0, 0, RCL_ROS_TIME);
+    stream_data.second.latest_innovation_norm_ = 0.0;
+    stream_data.second.latest_state_indices_.clear();
+    stream_data.second.latest_state_labels_.clear();
+    stream_data.second.latest_component_units_.clear();
+    stream_data.second.latest_component_gate_metrics_.clear();
+    stream_data.second.latest_component_innovations_.clear();
+    stream_data.second.latest_component_fused_.clear();
+  }
 
   // reset filter to uninitialized state
   filter_.reset();
@@ -872,6 +1017,52 @@ void RosFilter<T>::loadParams()
   // Update frequency and sensor timeout
   frequency_ = this->declare_parameter("frequency", 30.0);
 
+  mahalanobis_publish_rate_ = this->declare_parameter(
+    "mahalanobis_publish_rate", 0.0);
+  if (mahalanobis_publish_rate_ < 0.0) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Parameter mahalanobis_publish_rate was negative (%f). Using its absolute value.",
+      mahalanobis_publish_rate_);
+    mahalanobis_publish_rate_ = -mahalanobis_publish_rate_;
+  }
+  if (mahalanobis_publish_rate_ > 0.0) {
+    mahalanobis_publish_period_ =
+      rclcpp::Duration::from_seconds(1.0 / mahalanobis_publish_rate_);
+  } else {
+    mahalanobis_publish_period_ = rclcpp::Duration(0, 0u);
+  }
+
+  tuning_telemetry_enabled_ = this->declare_parameter(
+    "tuning_telemetry_enabled", false);
+  tuning_telemetry_publish_rate_ = this->declare_parameter(
+    "tuning_telemetry_publish_rate", 5.0);
+  if (tuning_telemetry_publish_rate_ < 0.0) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Parameter tuning_telemetry_publish_rate was negative (%f). Using its absolute value.",
+      tuning_telemetry_publish_rate_);
+    tuning_telemetry_publish_rate_ = -tuning_telemetry_publish_rate_;
+  }
+  if (tuning_telemetry_publish_rate_ > 0.0) {
+    tuning_telemetry_publish_period_ =
+      rclcpp::Duration::from_seconds(1.0 / tuning_telemetry_publish_rate_);
+  } else {
+    tuning_telemetry_publish_period_ = rclcpp::Duration(0, 0u);
+  }
+
+  tuning_visualizer_enabled_ = this->declare_parameter(
+    "tuning_visualizer_enabled", false);
+  tuning_visualizer_history_seconds_ = this->declare_parameter(
+    "tuning_visualizer_history_seconds", 60.0);
+  if (tuning_visualizer_history_seconds_ <= 0.0) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Parameter tuning_visualizer_history_seconds was non-positive (%f). Using 60.0 seconds.",
+      tuning_visualizer_history_seconds_);
+    tuning_visualizer_history_seconds_ = 60.0;
+  }
+
   predict_to_current_time_ = this->declare_parameter<bool>("predict_to_current_time", false);
 
   double sensor_timeout = this->declare_parameter("sensor_timeout", 1.0 / frequency_);
@@ -1024,6 +1215,23 @@ void RosFilter<T>::loadParams()
   disabled_at_startup_ = this->declare_parameter<bool>("disabled_at_startup", false);
   enabled_ = !disabled_at_startup_;
 
+  filter_.setMahalanobisResultCallback(std::bind(
+      &RosFilter<T>::handleMahalanobisResult,
+      this,
+      std::placeholders::_1,
+      std::placeholders::_2,
+      std::placeholders::_3,
+      std::placeholders::_4,
+      std::placeholders::_5));
+  if (tuning_visualizer_enabled_) {
+    filter_.setInnovationResultCallback(std::bind(
+        &RosFilter<T>::handleInnovationResult,
+        this,
+        std::placeholders::_1));
+  } else {
+    filter_.setInnovationResultCallback(FilterBase::InnovationResultCallback());
+  }
+
   // Debugging writes to file
   RF_DEBUG(
     std::boolalpha <<
@@ -1036,6 +1244,9 @@ void RosFilter<T>::loadParams()
       "\ntransform_time_offset is " << filter_utilities::toSec(tf_time_offset_) <<
       "\ntransform_timeout is " << filter_utilities::toSec(tf_timeout_) <<
       "\nfrequency is " << frequency_ <<
+      "\nmahalanobis_publish_rate is " << mahalanobis_publish_rate_ <<
+      "\ntuning_visualizer_enabled is " << tuning_visualizer_enabled_ <<
+      "\ntuning_visualizer_history_seconds is " << tuning_visualizer_history_seconds_ <<
       "\nsensor_timeout is " << filter_utilities::toSec(filter_.getSensorTimeout()) <<
       "\ntwo_d_mode is " << (two_d_mode_ ? "true" : "false") <<
       "\nsmooth_lagged_data is " << (smooth_lagged_data_ ? "true" : "false") <<
@@ -1167,6 +1378,15 @@ void RosFilter<T>::loadParams()
       const CallbackData twist_callback_data(
         odom_topic_name + "_twist", twist_update_vec, twist_update_sum, false,
         false, twist_mahalanobis_thresh);
+
+      if (pose_update_sum > 0) {
+        registerMahalanobisStream(
+          pose_callback_data.topic_name_, odom_topic, &pose_callback_data.update_vector_);
+      }
+      if (twist_update_sum > 0) {
+        registerMahalanobisStream(
+          twist_callback_data.topic_name_, odom_topic, &twist_callback_data.update_vector_);
+      }
 
       // Store the odometry topic subscribers so they don't go out of scope.
       if (pose_update_sum + twist_update_sum > 0) {
@@ -1304,6 +1524,8 @@ void RosFilter<T>::loadParams()
         const CallbackData callback_data(pose_topic_name, pose_update_vec,
           pose_update_sum, differential,
           relative, pose_mahalanobis_thresh);
+        registerMahalanobisStream(
+          callback_data.topic_name_, pose_topic, &callback_data.update_vector_);
 
         std::function<void(const std::shared_ptr<
             geometry_msgs::msg::PoseWithCovarianceStamped>)>
@@ -1400,6 +1622,8 @@ void RosFilter<T>::loadParams()
         const CallbackData callback_data(twist_topic_name, twist_update_vec,
           twist_update_sum, false, false,
           twist_mahalanobis_thresh);
+        registerMahalanobisStream(
+          callback_data.topic_name_, twist_topic, &callback_data.update_vector_);
 
         std::function<void(const std::shared_ptr<
             geometry_msgs::msg::TwistWithCovarianceStamped>)>
@@ -1608,6 +1832,19 @@ void RosFilter<T>::loadParams()
         const CallbackData accel_callback_data(
           imu_topic_name + "_acceleration", accel_update_vec, accelUpdateSum,
           differential, relative, accel_mahalanobis_thresh);
+
+        if (pose_update_sum > 0) {
+          registerMahalanobisStream(
+            pose_callback_data.topic_name_, imu_topic, &pose_callback_data.update_vector_);
+        }
+        if (twist_update_sum > 0) {
+          registerMahalanobisStream(
+            twist_callback_data.topic_name_, imu_topic, &twist_callback_data.update_vector_);
+        }
+        if (accelUpdateSum > 0) {
+          registerMahalanobisStream(
+            accel_callback_data.topic_name_, imu_topic, &accel_callback_data.update_vector_);
+        }
 
         std::function<void(const std::shared_ptr<sensor_msgs::msg::Imu>)>
         imu_callback =
@@ -2017,11 +2254,43 @@ void RosFilter<T>::initialize()
       "accel/filtered", rclcpp::QoS(10), publisher_options);
   }
 
+  if (tuning_visualizer_enabled_) {
+    tuning_innovation_pub_ =
+      this->create_publisher<robot_localization::msg::InnovationDiagnostic>(
+      "tuning/innovation_diagnostics", rclcpp::QoS(50), publisher_options);
+    tuning_filter_state_pub_ =
+      this->create_publisher<robot_localization::msg::FilterStateDiagnostic>(
+      "tuning/filter_state", rclcpp::QoS(10), publisher_options);
+  }
+
+  if (tuning_visualizer_enabled_ || tuning_telemetry_enabled_) {
+    tuning_streams_pub_ =
+      this->create_publisher<std_msgs::msg::String>(
+      "tuning/configured_streams",
+      rclcpp::QoS(1).reliable().transient_local(),
+      publisher_options);
+    publishConfiguredStreams();
+  }
+
+  if (tuning_telemetry_enabled_) {
+    tuning_telemetry_pub_ =
+      this->create_publisher<robot_localization::msg::TelemetrySnapshot>(
+      "tuning/stream_telemetry", rclcpp::QoS(10), publisher_options);
+    tuning_branch_status_pub_ =
+      this->create_publisher<robot_localization::msg::BranchStatusSnapshot>(
+      "tuning/branch_fusion_status", rclcpp::QoS(10), publisher_options);
+    tuning_component_status_pub_ =
+      this->create_publisher<robot_localization::msg::ComponentStatusSnapshot>(
+      "tuning/component_fusion_status", rclcpp::QoS(10), publisher_options);
+  }
+
   const std::chrono::duration<double> timespan{1.0 / frequency_};
   timer_ = rclcpp::GenericTimer<rclcpp::VoidCallbackType>::make_shared(
     this->get_clock(), std::chrono::duration_cast<std::chrono::nanoseconds>(timespan),
     std::bind(&RosFilter<T>::periodicUpdate, this), this->get_node_base_interface()->get_context());
   this->get_node_timers_interface()->add_timer(timer_, nullptr);
+
+  startTuningVisualizerIfRequested();
 }
 
 template<typename T>
@@ -2057,6 +2326,7 @@ void RosFilter<T>::periodicUpdate()
   bool corrected_data = false;
 
   if (getFilteredOdometryMessage(filtered_position.get())) {
+    const rclcpp::Time filter_state_stamp = filtered_position->header.stamp;
     world_base_link_trans_msg_.header.stamp =
       static_cast<rclcpp::Time>(filtered_position->header.stamp) + tf_time_offset_;
     world_base_link_trans_msg_.header.frame_id =
@@ -2164,6 +2434,8 @@ void RosFilter<T>::periodicUpdate()
     // Retain the last published stamp so we can detect repeated transforms in future cycles
     last_published_stamp_ = filtered_position->header.stamp;
 
+    publishFilterStateDiagnostic(filter_state_stamp);
+
     // Fire off the position and the transform
     if (!corrected_data) {
       position_pub_->publish(std::move(filtered_position));
@@ -2180,6 +2452,28 @@ void RosFilter<T>::periodicUpdate()
     getFilteredAccelMessage(filtered_acceleration.get()))
   {
     accel_pub_->publish(std::move(filtered_acceleration));
+  }
+
+  if (mahalanobis_publish_rate_ > 0.0) {
+    const bool first_mahalanobis_publish =
+      (last_mahalanobis_publish_time_.nanoseconds() == 0);
+    const bool period_elapsed =
+      (cur_time - last_mahalanobis_publish_time_) >= mahalanobis_publish_period_;
+    if (first_mahalanobis_publish || period_elapsed) {
+      publishAllMahalanobisDistances();
+      last_mahalanobis_publish_time_ = cur_time;
+    }
+  }
+
+  if (tuning_telemetry_enabled_ && tuning_telemetry_publish_rate_ > 0.0) {
+    const bool first_telemetry_publish =
+      (last_tuning_telemetry_publish_time_.nanoseconds() == 0);
+    const bool telemetry_period_elapsed =
+      (cur_time - last_tuning_telemetry_publish_time_) >= tuning_telemetry_publish_period_;
+    if (first_telemetry_publish || telemetry_period_elapsed) {
+      publishTelemetrySnapshots(cur_time);
+      last_tuning_telemetry_publish_time_ = cur_time;
+    }
   }
 
   /* Diagnostics can behave strangely when playing back from bag
@@ -2209,6 +2503,443 @@ void RosFilter<T>::periodicUpdate()
       loop_elapsed << "seconds. Try decreasing the rate, limiting "
       "sensor output frequency, or limiting the number of sensors.\n";
   }
+}
+
+template<typename T>
+void RosFilter<T>::handleMahalanobisResult(
+  const std::string & stream_name,
+  const double mahalanobis_distance,
+  const double mahalanobis_threshold,
+  const bool passed,
+  const rclcpp::Time & measurement_time)
+{
+  registerMahalanobisStream(stream_name);
+  auto stream_data = mahalanobis_stream_data_.find(stream_name);
+  if (stream_data == mahalanobis_stream_data_.end()) {
+    return;
+  }
+
+  stream_data->second.latest_distance_ = mahalanobis_distance;
+  stream_data->second.latest_threshold_ = mahalanobis_threshold;
+  stream_data->second.has_value_ = true;
+  stream_data->second.latest_passed_ = passed;
+  stream_data->second.latest_measurement_time_ = measurement_time;
+
+  RF_DEBUG(
+    "Mahalanobis result for " << stream_name <<
+      " at time " << filter_utilities::toSec(measurement_time) <<
+      ": distance=" << mahalanobis_distance <<
+      ", threshold=" << mahalanobis_threshold <<
+      ", passed=" << std::boolalpha << passed << "\n");
+
+  if (!passed) {
+    publishMahalanobisDistance(stream_name, mahalanobis_distance);
+  }
+}
+
+template<typename T>
+void RosFilter<T>::handleInnovationResult(
+  const FilterBase::InnovationResult & result)
+{
+  registerMahalanobisStream(result.topic_name_);
+  auto stream_data = mahalanobis_stream_data_.find(result.topic_name_);
+  if (stream_data != mahalanobis_stream_data_.end()) {
+    auto & latest_data = stream_data->second;
+    latest_data.latest_distance_ = result.mahalanobis_distance_;
+    latest_data.latest_threshold_ = result.mahalanobis_threshold_;
+    latest_data.latest_passed_ = result.passed_;
+    latest_data.has_value_ = true;
+    latest_data.latest_measurement_time_ = result.measurement_time_;
+    latest_data.latest_state_indices_.clear();
+    latest_data.latest_state_labels_.clear();
+    latest_data.latest_component_units_.clear();
+    latest_data.latest_component_gate_metrics_.clear();
+    latest_data.latest_component_innovations_.clear();
+    latest_data.latest_component_fused_.clear();
+
+    const Eigen::Index component_count = std::min<Eigen::Index>(
+      static_cast<Eigen::Index>(result.state_indices_.size()),
+      std::min(result.innovation_.size(), result.innovation_covariance_diagonal_.size()));
+    latest_data.latest_state_indices_.reserve(static_cast<size_t>(component_count));
+    latest_data.latest_state_labels_.reserve(static_cast<size_t>(component_count));
+    latest_data.latest_component_units_.reserve(static_cast<size_t>(component_count));
+    latest_data.latest_component_gate_metrics_.reserve(static_cast<size_t>(component_count));
+    latest_data.latest_component_innovations_.reserve(static_cast<size_t>(component_count));
+    latest_data.latest_component_fused_.reserve(static_cast<size_t>(component_count));
+
+    double innovation_norm_squared = 0.0;
+    const bool threshold_is_enabled =
+      std::isfinite(result.mahalanobis_threshold_) && result.mahalanobis_threshold_ < 1.0e6;
+
+    for (Eigen::Index index = 0; index < component_count; ++index) {
+      const size_t state_index = result.state_indices_[static_cast<size_t>(index)];
+      const double display_scale = stateIndexDisplayScale(state_index);
+      const double innovation_display = result.innovation_(index) * display_scale;
+      const double innovation_sigma_display =
+        std::sqrt(std::max(result.innovation_covariance_diagonal_(index), 0.0)) * display_scale;
+      const double component_gate_metric =
+        innovation_display / std::max(innovation_sigma_display, 1.0e-9);
+
+      latest_data.latest_state_indices_.push_back(state_index);
+      latest_data.latest_state_labels_.push_back(stateIndexShortLabel(state_index));
+      latest_data.latest_component_units_.push_back(stateIndexDisplayUnit(state_index));
+      latest_data.latest_component_gate_metrics_.push_back(component_gate_metric);
+      latest_data.latest_component_innovations_.push_back(innovation_display);
+      latest_data.latest_component_fused_.push_back(
+        !threshold_is_enabled || std::fabs(component_gate_metric) < result.mahalanobis_threshold_);
+
+      innovation_norm_squared += innovation_display * innovation_display;
+    }
+
+    latest_data.latest_innovation_norm_ = std::sqrt(std::max(innovation_norm_squared, 0.0));
+  }
+
+  if (!tuning_innovation_pub_) {
+    return;
+  }
+
+  robot_localization::msg::InnovationDiagnostic diagnostic_msg;
+  diagnostic_msg.stamp = result.measurement_time_;
+  diagnostic_msg.stream_name = result.topic_name_;
+  diagnostic_msg.accepted = result.passed_;
+  diagnostic_msg.mahalanobis_distance = result.mahalanobis_distance_;
+  diagnostic_msg.mahalanobis_threshold = result.mahalanobis_threshold_;
+  diagnostic_msg.state_indices.reserve(result.state_indices_.size());
+  for (const size_t state_index : result.state_indices_) {
+    diagnostic_msg.state_indices.push_back(static_cast<uint32_t>(state_index));
+  }
+  diagnostic_msg.measurement = eigenVectorToStdVector(result.measurement_);
+  diagnostic_msg.predicted_measurement =
+    eigenVectorToStdVector(result.predicted_measurement_);
+  diagnostic_msg.innovation = eigenVectorToStdVector(result.innovation_);
+  diagnostic_msg.measurement_covariance_diagonal =
+    eigenVectorToStdVector(result.measurement_covariance_diagonal_);
+  diagnostic_msg.innovation_covariance_diagonal =
+    eigenVectorToStdVector(result.innovation_covariance_diagonal_);
+  tuning_innovation_pub_->publish(diagnostic_msg);
+}
+
+template<typename T>
+void RosFilter<T>::registerMahalanobisStream(
+  const std::string & stream_name,
+  const std::string & source_topic,
+  const std::vector<bool> * update_vector)
+{
+  const std::vector<size_t> configured_state_indices =
+    update_vector == nullptr ? std::vector<size_t>() : updateVectorToStateIndices(*update_vector);
+
+  if (mahalanobis_stream_data_.count(stream_name) == 0) {
+    mahalanobis_stream_data_.emplace(
+      stream_name,
+      MahalanobisStreamData{
+        0.0,
+        0.0,
+        false,
+        true,
+        source_topic,
+        configured_state_indices,
+        rclcpp::Time(0, 0, RCL_ROS_TIME),
+        0.0,
+        std::vector<size_t>(),
+        std::vector<std::string>(),
+        std::vector<std::string>(),
+        std::vector<double>(),
+        std::vector<double>(),
+        std::vector<bool>()});
+    publishConfiguredStreams();
+  } else if (!source_topic.empty() || update_vector != nullptr) {
+    auto & stream_data = mahalanobis_stream_data_[stream_name];
+    if ((!source_topic.empty() && stream_data.source_topic_ != source_topic) ||
+      (update_vector != nullptr &&
+      stream_data.configured_state_indices_ != configured_state_indices))
+    {
+      if (!source_topic.empty()) {
+        stream_data.source_topic_ = source_topic;
+      }
+      stream_data.configured_state_indices_ = configured_state_indices;
+      publishConfiguredStreams();
+    }
+  }
+
+  if (mahalanobis_publishers_.count(stream_name) == 0) {
+    rclcpp::PublisherOptions publisher_options;
+    publisher_options.qos_overriding_options =
+      rclcpp::QosOverridingOptions::with_default_policies();
+    mahalanobis_publishers_[stream_name] =
+      this->create_publisher<std_msgs::msg::Float64>(
+      "mahalanobis/" + stream_name, rclcpp::QoS(10), publisher_options);
+  }
+}
+
+template<typename T>
+void RosFilter<T>::publishConfiguredStreams()
+{
+  if (!tuning_streams_pub_) {
+    return;
+  }
+
+  std::vector<std::string> stream_names;
+  stream_names.reserve(mahalanobis_stream_data_.size());
+  for (const auto & stream_data : mahalanobis_stream_data_) {
+    stream_names.push_back(stream_data.first);
+  }
+  std::sort(stream_names.begin(), stream_names.end());
+
+  std_msgs::msg::String configured_streams_msg;
+  for (size_t index = 0; index < stream_names.size(); ++index) {
+    if (index > 0) {
+      configured_streams_msg.data += "\n";
+    }
+    configured_streams_msg.data += stream_names[index];
+    const auto stream_data = mahalanobis_stream_data_.find(stream_names[index]);
+    if (stream_data != mahalanobis_stream_data_.end()) {
+      configured_streams_msg.data += "\t";
+      configured_streams_msg.data += stream_data->second.source_topic_;
+      configured_streams_msg.data += "\t";
+      for (size_t component_index = 0;
+        component_index < stream_data->second.configured_state_indices_.size();
+        ++component_index)
+      {
+        if (component_index > 0) {
+          configured_streams_msg.data += ",";
+        }
+        configured_streams_msg.data += std::to_string(
+          stream_data->second.configured_state_indices_[component_index]);
+      }
+    }
+  }
+
+  tuning_streams_pub_->publish(configured_streams_msg);
+}
+
+template<typename T>
+void RosFilter<T>::publishAllMahalanobisDistances()
+{
+  for (const auto & stream_data : mahalanobis_stream_data_) {
+    if (stream_data.second.has_value_) {
+      publishMahalanobisDistance(
+        stream_data.first,
+        stream_data.second.latest_distance_);
+    }
+  }
+}
+
+template<typename T>
+void RosFilter<T>::publishMahalanobisDistance(
+  const std::string & stream_name,
+  const double mahalanobis_distance)
+{
+  auto publisher = mahalanobis_publishers_.find(stream_name);
+  if (publisher == mahalanobis_publishers_.end()) {
+    registerMahalanobisStream(stream_name);
+    publisher = mahalanobis_publishers_.find(stream_name);
+  }
+  if (publisher == mahalanobis_publishers_.end()) {
+    return;
+  }
+
+  std_msgs::msg::Float64 mahalanobis_msg;
+  mahalanobis_msg.data = mahalanobis_distance;
+  publisher->second->publish(mahalanobis_msg);
+}
+
+template<typename T>
+void RosFilter<T>::publishFilterStateDiagnostic(const rclcpp::Time & stamp)
+{
+  if (!tuning_filter_state_pub_) {
+    return;
+  }
+
+  robot_localization::msg::FilterStateDiagnostic diagnostic_msg;
+  diagnostic_msg.stamp = stamp;
+  diagnostic_msg.state = eigenVectorToStdVector(filter_.getState());
+  diagnostic_msg.estimate_error_covariance_diagonal =
+    eigenVectorToStdVector(filter_.getEstimateErrorCovariance().diagonal());
+  diagnostic_msg.process_noise_covariance_diagonal =
+    eigenVectorToStdVector(filter_.getProcessNoiseCovariance().diagonal());
+  tuning_filter_state_pub_->publish(diagnostic_msg);
+}
+
+template<typename T>
+void RosFilter<T>::publishTelemetrySnapshots(const rclcpp::Time & stamp)
+{
+  if (!tuning_telemetry_pub_ && !tuning_branch_status_pub_ && !tuning_component_status_pub_) {
+    return;
+  }
+
+  robot_localization::msg::TelemetrySnapshot telemetry_snapshot;
+  telemetry_snapshot.stamp = stamp;
+
+  robot_localization::msg::BranchStatusSnapshot branch_status_snapshot;
+  branch_status_snapshot.stamp = stamp;
+
+  robot_localization::msg::ComponentStatusSnapshot component_status_snapshot;
+  component_status_snapshot.stamp = stamp;
+
+  std::vector<std::string> stream_names;
+  stream_names.reserve(mahalanobis_stream_data_.size());
+  for (const auto & stream_data : mahalanobis_stream_data_) {
+    if (stream_data.second.has_value_) {
+      stream_names.push_back(stream_data.first);
+    }
+  }
+  std::sort(stream_names.begin(), stream_names.end());
+
+  telemetry_snapshot.streams.reserve(stream_names.size());
+  branch_status_snapshot.streams.reserve(stream_names.size());
+  component_status_snapshot.streams.reserve(stream_names.size());
+
+  for (const auto & stream_name : stream_names) {
+    const auto stream_data = mahalanobis_stream_data_.find(stream_name);
+    if (stream_data == mahalanobis_stream_data_.end()) {
+      continue;
+    }
+
+    const auto & latest_data = stream_data->second;
+
+    robot_localization::msg::StreamTelemetry telemetry_msg;
+    telemetry_msg.measurement_time = latest_data.latest_measurement_time_;
+    telemetry_msg.stream_name = stream_name;
+    telemetry_msg.source_topic = latest_data.source_topic_;
+    telemetry_msg.fused = latest_data.latest_passed_;
+    telemetry_msg.gate_metric = latest_data.latest_distance_;
+    telemetry_msg.gate_threshold = latest_data.latest_threshold_;
+    telemetry_msg.innovation_norm = latest_data.latest_innovation_norm_;
+    telemetry_msg.state_labels = latest_data.latest_state_labels_;
+    telemetry_msg.component_units = latest_data.latest_component_units_;
+    telemetry_msg.component_gate_metrics = latest_data.latest_component_gate_metrics_;
+    telemetry_msg.component_innovations = latest_data.latest_component_innovations_;
+    telemetry_msg.state_indices.reserve(latest_data.latest_state_indices_.size());
+    for (const size_t state_index : latest_data.latest_state_indices_) {
+      telemetry_msg.state_indices.push_back(static_cast<uint32_t>(state_index));
+    }
+    telemetry_snapshot.streams.push_back(telemetry_msg);
+
+    robot_localization::msg::StreamBranchStatus branch_status_msg;
+    branch_status_msg.stream_name = stream_name;
+    branch_status_msg.source_topic = latest_data.source_topic_;
+    branch_status_msg.fused = latest_data.latest_passed_;
+    branch_status_snapshot.streams.push_back(branch_status_msg);
+
+    robot_localization::msg::StreamComponentStatus component_status_msg;
+    component_status_msg.stream_name = stream_name;
+    component_status_msg.source_topic = latest_data.source_topic_;
+    component_status_msg.state_labels = latest_data.latest_state_labels_;
+    component_status_msg.fused = latest_data.latest_component_fused_;
+    component_status_msg.state_indices.reserve(latest_data.latest_state_indices_.size());
+    for (const size_t state_index : latest_data.latest_state_indices_) {
+      component_status_msg.state_indices.push_back(static_cast<uint32_t>(state_index));
+    }
+    component_status_snapshot.streams.push_back(component_status_msg);
+  }
+
+  if (tuning_telemetry_pub_) {
+    tuning_telemetry_pub_->publish(telemetry_snapshot);
+  }
+  if (tuning_branch_status_pub_) {
+    tuning_branch_status_pub_->publish(branch_status_snapshot);
+  }
+  if (tuning_component_status_pub_) {
+    tuning_component_status_pub_->publish(component_status_snapshot);
+  }
+}
+
+template<typename T>
+void RosFilter<T>::startTuningVisualizerIfRequested()
+{
+  if (!tuning_visualizer_enabled_ || tuning_visualizer_pid_ > 0) {
+    return;
+  }
+
+#ifdef _WIN32
+  RCLCPP_WARN(
+    this->get_logger(),
+    "The EKF tuning visualizer auto-launch is not supported on Windows.");
+#else
+  const char * display = std::getenv("DISPLAY");
+  const char * wayland_display = std::getenv("WAYLAND_DISPLAY");
+  const bool has_display =
+    (display != nullptr && display[0] != '\0') ||
+    (wayland_display != nullptr && wayland_display[0] != '\0');
+  if (!has_display) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "tuning_visualizer_enabled is true, but no DISPLAY/WAYLAND_DISPLAY was found. "
+      "Skipping auto-launch of the tuning window.");
+    return;
+  }
+
+  std::string script_path;
+  try {
+    script_path =
+      ament_index_cpp::get_package_prefix("robot_localization") +
+      "/lib/robot_localization/ekf_tuning_visualizer.py";
+  } catch (const std::exception & exception) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Unable to resolve robot_localization install prefix for tuning visualizer: %s",
+      exception.what());
+    return;
+  }
+
+  if (::access(script_path.c_str(), X_OK) != 0) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Tuning visualizer script %s is not executable or not present. Skipping auto-launch.",
+      script_path.c_str());
+    return;
+  }
+
+  const std::string namespace_remap =
+    std::string("__ns:=") + this->get_namespace();
+  const std::string node_name_remap =
+    std::string("__node:=") + this->get_name() + "_tuning_visualizer";
+  const std::string history_param =
+    "history_seconds:=" + std::to_string(tuning_visualizer_history_seconds_);
+
+  const pid_t child_pid = fork();
+  if (child_pid == 0) {
+    execlp(
+      "python3",
+      "python3",
+      script_path.c_str(),
+      "--ros-args",
+      "-r",
+      namespace_remap.c_str(),
+      "-r",
+      node_name_remap.c_str(),
+      "-p",
+      history_param.c_str(),
+      static_cast<char *>(nullptr));
+    _exit(127);
+  }
+
+  if (child_pid < 0) {
+    RCLCPP_WARN(
+      this->get_logger(),
+      "Failed to auto-launch the tuning visualizer child process.");
+    return;
+  }
+
+  tuning_visualizer_pid_ = child_pid;
+  RCLCPP_INFO(
+    this->get_logger(),
+    "Auto-started EKF tuning visualizer with PID %d.",
+    tuning_visualizer_pid_);
+#endif
+}
+
+template<typename T>
+void RosFilter<T>::stopTuningVisualizer()
+{
+#ifndef _WIN32
+  if (tuning_visualizer_pid_ > 0) {
+    kill(static_cast<pid_t>(tuning_visualizer_pid_), SIGTERM);
+    int status = 0;
+    waitpid(static_cast<pid_t>(tuning_visualizer_pid_), &status, 0);
+    tuning_visualizer_pid_ = -1;
+  }
+#endif
 }
 
 template<typename T>

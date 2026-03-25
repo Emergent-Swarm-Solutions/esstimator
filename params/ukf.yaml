@@ -11,6 +11,22 @@ ukf_filter_node:
 # filter will generate new output. Defaults to 1 / frequency if not specified.
         sensor_timeout: 0.1
 
+# When true, robot_localization publishes richer tuning diagnostics on /tuning/* and attempts to
+# auto-launch a matplotlib window for EKF/UKF tuning when a desktop display is available.
+        tuning_visualizer_enabled: false
+
+# Rolling time window shown by the tuning visualizer, in seconds.
+        tuning_visualizer_history_seconds: 60.0
+
+# When true, robot_localization publishes periodic tuning telemetry snapshots on /tuning/* for
+# rosbag analysis. This includes branch-level gate and innovation metrics, per-component gate and
+# innovation values, and branch/component fused status snapshots.
+        tuning_telemetry_enabled: false
+
+# Publish rate in Hz for the periodic tuning telemetry snapshots. Set to 0.0 (or less) to disable
+# periodic publishing even if tuning_telemetry_enabled is true.
+        tuning_telemetry_publish_rate: 5.0
+
 # ekf_localization_node and ukf_localization_node both use a 3D omnidirectional motion model. If this parameter is
 # set to true, no 3D information will be used in your state estimate. Use this if you are operating in a planar
 # environment and want to ignore the effect of small variations in the ground plane that might otherwise be detected

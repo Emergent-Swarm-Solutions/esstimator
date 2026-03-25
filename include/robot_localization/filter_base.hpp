@@ -35,6 +35,7 @@
 #define ROBOT_LOCALIZATION__FILTER_BASE_HPP_
 
 #include <algorithm>
+#include <functional>
 #include <memory>
 #include <ostream>
 #include <string>
@@ -52,6 +53,31 @@ namespace robot_localization
 class FilterBase
 {
 public:
+  using MahalanobisResultCallback = std::function<void(
+      const std::string & topic_name,
+      const double mahalanobis_distance,
+      const double mahalanobis_threshold,
+      const bool passed,
+      const rclcpp::Time & measurement_time)>;
+
+  struct InnovationResult
+  {
+    std::string topic_name_;
+    rclcpp::Time measurement_time_;
+    std::vector<size_t> state_indices_;
+    Eigen::VectorXd measurement_;
+    Eigen::VectorXd predicted_measurement_;
+    Eigen::VectorXd innovation_;
+    Eigen::VectorXd measurement_covariance_diagonal_;
+    Eigen::VectorXd innovation_covariance_diagonal_;
+    double mahalanobis_distance_;
+    double mahalanobis_threshold_;
+    bool passed_;
+  };
+
+  using InnovationResultCallback = std::function<void(
+      const InnovationResult & result)>;
+
   /**
    * @brief Constructor for the FilterBase class
    */
@@ -274,6 +300,18 @@ public:
    */
   void validateDelta(rclcpp::Duration & delta);
 
+  /**
+   * @brief Sets the callback to receive Mahalanobis test results
+   * @param[in] callback - Callback to receive Mahalanobis test results
+   */
+  void setMahalanobisResultCallback(const MahalanobisResultCallback & callback);
+
+  /**
+   * @brief Sets the callback to receive innovation diagnostics
+   * @param[in] callback - Callback to receive innovation diagnostics
+   */
+  void setInnovationResultCallback(const InnovationResultCallback & callback);
+
 protected:
   /**
    * @brief Method for settings bounds on acceleration values derived from
@@ -310,12 +348,36 @@ protected:
    * @param[in] innovation_covariance - The innovation error
    * @param[in] n_sigmas - Number of standard deviations that are considered
    * acceptable
+   * @param[out] squared_mahalanobis - Optional output for the squared
+   * Mahalanobis distance
    */
   virtual bool
   checkMahalanobisThreshold(
     const Eigen::VectorXd & innovation,
     const Eigen::MatrixXd & innovation_covariance,
-    const double n_sigmas);
+    const double n_sigmas,
+    double * squared_mahalanobis = nullptr);
+
+  /**
+   * @brief Reports a Mahalanobis test result to registered callback.
+   * @param[in] topic_name - Name of the source stream for this measurement
+   * @param[in] mahalanobis_distance - Innovation Mahalanobis distance
+   * @param[in] mahalanobis_threshold - Configured Mahalanobis threshold
+   * @param[in] passed - True when the measurement passed the threshold
+   * @param[in] measurement_time - Timestamp of the processed measurement
+   */
+  void reportMahalanobisResult(
+    const std::string & topic_name,
+    const double mahalanobis_distance,
+    const double mahalanobis_threshold,
+    const bool passed,
+    const rclcpp::Time & measurement_time);
+
+  /**
+   * @brief Reports innovation diagnostics to a registered callback.
+   * @param[in] result - Innovation diagnostics for the processed measurement
+   */
+  void reportInnovationResult(const InnovationResult & result);
 
   /**
    * @brief Converts the control term to an acceleration to be applied in the
@@ -374,6 +436,16 @@ protected:
    * @brief Used for outputting debug messages
    */
   std::ostream * debug_stream_;
+
+  /**
+   * @brief Optional callback for Mahalanobis test results
+   */
+  MahalanobisResultCallback mahalanobis_result_callback_;
+
+  /**
+   * @brief Optional callback for detailed innovation diagnostics
+   */
+  InnovationResultCallback innovation_result_callback_;
 
   /**
    * @brief Gains applied to acceleration derived from control term

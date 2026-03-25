@@ -1,0 +1,11 @@
+builtin_interfaces/Time stamp
+string stream_name
+bool accepted
+float64 mahalanobis_distance
+float64 mahalanobis_threshold
+uint32[] state_indices
+float64[] measurement
+float64[] predicted_measurement
+float64[] innovation
+float64[] measurement_covariance_diagonal
+float64[] innovation_covariance_diagonal

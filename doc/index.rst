@@ -9,6 +9,7 @@ robot_localization wiki
    :hidden:
 
    state_estimation_nodes
+   tuning_with_visualizer
    navsat_transform_node
    preparing_sensor_data
    configuring_robot_localization
@@ -51,4 +52,3 @@ Indices and tables
 
 * :ref:`genindex`
 * :ref:`search`
-

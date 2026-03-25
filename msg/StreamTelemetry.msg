@@ -1,0 +1,12 @@
+builtin_interfaces/Time measurement_time
+string stream_name
+string source_topic
+bool fused
+float64 gate_metric
+float64 gate_threshold
+float64 innovation_norm
+uint32[] state_indices
+string[] state_labels
+string[] component_units
+float64[] component_gate_metrics
+float64[] component_innovations

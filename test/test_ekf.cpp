@@ -115,6 +115,110 @@ TEST(EkfTest, Measurements) {
   }
 }
 
+TEST(EkfTest, MahalanobisResultCallback) {
+  Ekf filter;
+
+  bool callback_called = false;
+  bool callback_passed = true;
+  std::string callback_stream;
+  double callback_distance = 0.0;
+  double callback_threshold = 0.0;
+  rclcpp::Time callback_time(0, 0, RCL_ROS_TIME);
+
+  filter.setMahalanobisResultCallback(
+    [&](const std::string & stream_name,
+      const double mahalanobis_distance,
+      const double mahalanobis_threshold,
+      const bool passed,
+      const rclcpp::Time & measurement_time)
+    {
+      callback_called = true;
+      callback_passed = passed;
+      callback_stream = stream_name;
+      callback_distance = mahalanobis_distance;
+      callback_threshold = mahalanobis_threshold;
+      callback_time = measurement_time;
+    });
+
+  robot_localization::Measurement initial_measurement;
+  initial_measurement.topic_name_ = "test_stream";
+  initial_measurement.time_ = rclcpp::Time(1, 0, RCL_ROS_TIME);
+  initial_measurement.mahalanobis_thresh_ = std::numeric_limits<double>::max();
+  initial_measurement.update_vector_ = std::vector<bool>(STATE_SIZE, false);
+  initial_measurement.update_vector_[robot_localization::StateMemberX] = true;
+  initial_measurement.measurement_ = Eigen::VectorXd::Zero(STATE_SIZE);
+  initial_measurement.covariance_ = Eigen::MatrixXd::Identity(STATE_SIZE, STATE_SIZE) * 0.1;
+  filter.processMeasurement(initial_measurement);
+
+  robot_localization::Measurement rejected_measurement = initial_measurement;
+  rejected_measurement.time_ = rclcpp::Time(2, 0, RCL_ROS_TIME);
+  rejected_measurement.mahalanobis_thresh_ = 1.0;
+  rejected_measurement.measurement_[robot_localization::StateMemberX] = 10.0;
+  filter.processMeasurement(rejected_measurement);
+
+  EXPECT_TRUE(callback_called);
+  EXPECT_FALSE(callback_passed);
+  EXPECT_EQ(callback_stream, "test_stream");
+  EXPECT_GT(callback_distance, callback_threshold);
+  EXPECT_EQ(callback_time, rejected_measurement.time_);
+}
+
+TEST(EkfTest, InnovationResultCallback) {
+  Ekf filter;
+
+  bool callback_called = false;
+  size_t callback_count = 0;
+  robot_localization::FilterBase::InnovationResult callback_result;
+
+  filter.setInnovationResultCallback(
+    [&](const robot_localization::FilterBase::InnovationResult & result)
+    {
+      callback_called = true;
+      ++callback_count;
+      callback_result = result;
+    });
+
+  robot_localization::Measurement initial_measurement;
+  initial_measurement.topic_name_ = "test_stream";
+  initial_measurement.time_ = rclcpp::Time(1, 0, RCL_ROS_TIME);
+  initial_measurement.mahalanobis_thresh_ = std::numeric_limits<double>::max();
+  initial_measurement.update_vector_ = std::vector<bool>(STATE_SIZE, false);
+  initial_measurement.update_vector_[robot_localization::StateMemberX] = true;
+  initial_measurement.measurement_ = Eigen::VectorXd::Zero(STATE_SIZE);
+  initial_measurement.covariance_ =
+    Eigen::MatrixXd::Identity(STATE_SIZE, STATE_SIZE) * 0.1;
+  filter.processMeasurement(initial_measurement);
+
+  robot_localization::Measurement rejected_measurement = initial_measurement;
+  rejected_measurement.time_ = rclcpp::Time(2, 0, RCL_ROS_TIME);
+  rejected_measurement.mahalanobis_thresh_ = 1.0;
+  rejected_measurement.measurement_[robot_localization::StateMemberX] = 10.0;
+  filter.processMeasurement(rejected_measurement);
+
+  EXPECT_TRUE(callback_called);
+  EXPECT_GE(callback_count, 1u);
+  EXPECT_EQ(callback_result.topic_name_, "test_stream");
+  EXPECT_EQ(callback_result.measurement_time_, rejected_measurement.time_);
+  ASSERT_EQ(callback_result.state_indices_.size(), 1u);
+  EXPECT_EQ(
+    callback_result.state_indices_.front(),
+    static_cast<size_t>(robot_localization::StateMemberX));
+  ASSERT_EQ(callback_result.measurement_.size(), 1);
+  ASSERT_EQ(callback_result.predicted_measurement_.size(), 1);
+  ASSERT_EQ(callback_result.innovation_.size(), 1);
+  ASSERT_EQ(callback_result.measurement_covariance_diagonal_.size(), 1);
+  ASSERT_EQ(callback_result.innovation_covariance_diagonal_.size(), 1);
+  EXPECT_DOUBLE_EQ(callback_result.measurement_(0), 10.0);
+  EXPECT_DOUBLE_EQ(callback_result.predicted_measurement_(0), 0.0);
+  EXPECT_DOUBLE_EQ(callback_result.innovation_(0), 10.0);
+  EXPECT_DOUBLE_EQ(callback_result.measurement_covariance_diagonal_(0), 0.1);
+  EXPECT_GT(callback_result.innovation_covariance_diagonal_(0), 0.0);
+  EXPECT_FALSE(callback_result.passed_);
+  EXPECT_GT(
+    callback_result.mahalanobis_distance_,
+    callback_result.mahalanobis_threshold_);
+}
+
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);

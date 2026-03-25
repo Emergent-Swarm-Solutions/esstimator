@@ -334,6 +334,18 @@ void FilterBase::setSensorTimeout(const rclcpp::Duration & sensor_timeout)
 
 void FilterBase::setState(const Eigen::VectorXd & state) {state_ = state;}
 
+void FilterBase::setMahalanobisResultCallback(
+  const MahalanobisResultCallback & callback)
+{
+  mahalanobis_result_callback_ = callback;
+}
+
+void FilterBase::setInnovationResultCallback(
+  const InnovationResultCallback & callback)
+{
+  innovation_result_callback_ = callback;
+}
+
 void FilterBase::validateDelta(rclcpp::Duration & /*delta*/)
 {
   // TODO(someone): Need to verify this condition B'Coz
@@ -430,16 +442,21 @@ void FilterBase::wrapStateAngles()
 
 bool FilterBase::checkMahalanobisThreshold(
   const Eigen::VectorXd & innovation,
-  const Eigen::MatrixXd & innovation_covariance, const double n_sigmas)
+  const Eigen::MatrixXd & innovation_covariance, const double n_sigmas,
+  double * squared_mahalanobis)
 {
-  double squared_mahalanobis =
+  const double squared_mahalanobis_local =
     innovation.dot(innovation_covariance * innovation);
-  double threshold = n_sigmas * n_sigmas;
+  const double threshold = n_sigmas * n_sigmas;
 
-  if (squared_mahalanobis >= threshold) {
+  if (squared_mahalanobis != nullptr) {
+    *squared_mahalanobis = squared_mahalanobis_local;
+  }
+
+  if (squared_mahalanobis_local >= threshold) {
     FB_DEBUG(
       "Innovation mahalanobis distance test failed. Squared Mahalanobis is: " <<
-        squared_mahalanobis << "\nThreshold is: " << threshold << "\n" <<
+        squared_mahalanobis_local << "\nThreshold is: " << threshold << "\n" <<
         "Innovation is: " << innovation << "\n" <<
         "Innovation covariance is:\n" <<
         innovation_covariance << "\n");
@@ -448,5 +465,29 @@ bool FilterBase::checkMahalanobisThreshold(
   }
 
   return true;
+}
+
+void FilterBase::reportMahalanobisResult(
+  const std::string & topic_name,
+  const double mahalanobis_distance,
+  const double mahalanobis_threshold,
+  const bool passed,
+  const rclcpp::Time & measurement_time)
+{
+  if (mahalanobis_result_callback_) {
+    mahalanobis_result_callback_(
+      topic_name,
+      mahalanobis_distance,
+      mahalanobis_threshold,
+      passed,
+      measurement_time);
+  }
+}
+
+void FilterBase::reportInnovationResult(const InnovationResult & result)
+{
+  if (innovation_result_callback_) {
+    innovation_result_callback_(result);
+  }
 }
 }  // namespace robot_localization
