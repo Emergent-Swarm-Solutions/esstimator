@@ -53,11 +53,11 @@
 #include <unistd.h>
 #endif
 
-#include <robot_localization/ekf.hpp>
-#include <robot_localization/filter_utilities.hpp>
-#include <robot_localization/ros_filter.hpp>
-#include <robot_localization/ros_filter_utilities.hpp>
-#include <robot_localization/ukf.hpp>
+#include <esstimator/ekf.hpp>
+#include <esstimator/filter_utilities.hpp>
+#include <esstimator/ros_filter.hpp>
+#include <esstimator/ros_filter_utilities.hpp>
+#include <esstimator/ukf.hpp>
 
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <rclcpp/qos.hpp>
@@ -303,9 +303,9 @@ template<typename T>
 void RosFilter<T>::toggleFilterProcessingCallback(
   const std::shared_ptr<rmw_request_id_t>/*request_header*/,
   const std::shared_ptr<
-    robot_localization::srv::ToggleFilterProcessing::Request> req,
+    esstimator::srv::ToggleFilterProcessing::Request> req,
   const std::shared_ptr<
-    robot_localization::srv::ToggleFilterProcessing::Response> resp)
+    esstimator::srv::ToggleFilterProcessing::Response> resp)
 {
   if (req->on == toggled_on_) {
     RCLCPP_WARN(
@@ -913,7 +913,7 @@ void RosFilter<T>::loadParams()
 
   // Grab the debug param. If true, the node will produce a LOT of output.
   bool debug = this->declare_parameter("debug", false);
-  std::string debug_out_file = "robot_localization_debug.txt";
+  std::string debug_out_file = "esstimator_debug.txt";
   if (debug) {
     try {
       debug_out_file = this->declare_parameter("debug_out_file", debug_out_file);
@@ -1272,7 +1272,7 @@ void RosFilter<T>::loadParams()
 
   // Create a service for manually setting/resetting pose
   set_pose_service_ =
-    this->create_service<robot_localization::srv::SetPose>(
+    this->create_service<esstimator::srv::SetPose>(
     "set_pose", std::bind(
       &RosFilter<T>::setPoseSrvCallback, this,
       std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
@@ -1287,7 +1287,7 @@ void RosFilter<T>::loadParams()
   // Create a service for toggling processing new measurements while still
   // publishing
   toggle_filter_processing_srv_ =
-    this->create_service<robot_localization::srv::ToggleFilterProcessing>(
+    this->create_service<esstimator::srv::ToggleFilterProcessing>(
     "toggle", std::bind(
       &RosFilter<T>::toggleFilterProcessingCallback, this,
       std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
@@ -2256,10 +2256,10 @@ void RosFilter<T>::initialize()
 
   if (tuning_visualizer_enabled_) {
     tuning_innovation_pub_ =
-      this->create_publisher<robot_localization::msg::InnovationDiagnostic>(
+      this->create_publisher<esstimator::msg::InnovationDiagnostic>(
       "tuning/innovation_diagnostics", rclcpp::QoS(50), publisher_options);
     tuning_filter_state_pub_ =
-      this->create_publisher<robot_localization::msg::FilterStateDiagnostic>(
+      this->create_publisher<esstimator::msg::FilterStateDiagnostic>(
       "tuning/filter_state", rclcpp::QoS(10), publisher_options);
   }
 
@@ -2274,13 +2274,13 @@ void RosFilter<T>::initialize()
 
   if (tuning_telemetry_enabled_) {
     tuning_telemetry_pub_ =
-      this->create_publisher<robot_localization::msg::TelemetrySnapshot>(
+      this->create_publisher<esstimator::msg::TelemetrySnapshot>(
       "tuning/stream_telemetry", rclcpp::QoS(10), publisher_options);
     tuning_branch_status_pub_ =
-      this->create_publisher<robot_localization::msg::BranchStatusSnapshot>(
+      this->create_publisher<esstimator::msg::BranchStatusSnapshot>(
       "tuning/branch_fusion_status", rclcpp::QoS(10), publisher_options);
     tuning_component_status_pub_ =
-      this->create_publisher<robot_localization::msg::ComponentStatusSnapshot>(
+      this->create_publisher<esstimator::msg::ComponentStatusSnapshot>(
       "tuning/component_fusion_status", rclcpp::QoS(10), publisher_options);
   }
 
@@ -2598,7 +2598,7 @@ void RosFilter<T>::handleInnovationResult(
     return;
   }
 
-  robot_localization::msg::InnovationDiagnostic diagnostic_msg;
+  esstimator::msg::InnovationDiagnostic diagnostic_msg;
   diagnostic_msg.stamp = result.measurement_time_;
   diagnostic_msg.stream_name = result.topic_name_;
   diagnostic_msg.accepted = result.passed_;
@@ -2750,7 +2750,7 @@ void RosFilter<T>::publishFilterStateDiagnostic(const rclcpp::Time & stamp)
     return;
   }
 
-  robot_localization::msg::FilterStateDiagnostic diagnostic_msg;
+  esstimator::msg::FilterStateDiagnostic diagnostic_msg;
   diagnostic_msg.stamp = stamp;
   diagnostic_msg.state = eigenVectorToStdVector(filter_.getState());
   diagnostic_msg.estimate_error_covariance_diagonal =
@@ -2767,13 +2767,13 @@ void RosFilter<T>::publishTelemetrySnapshots(const rclcpp::Time & stamp)
     return;
   }
 
-  robot_localization::msg::TelemetrySnapshot telemetry_snapshot;
+  esstimator::msg::TelemetrySnapshot telemetry_snapshot;
   telemetry_snapshot.stamp = stamp;
 
-  robot_localization::msg::BranchStatusSnapshot branch_status_snapshot;
+  esstimator::msg::BranchStatusSnapshot branch_status_snapshot;
   branch_status_snapshot.stamp = stamp;
 
-  robot_localization::msg::ComponentStatusSnapshot component_status_snapshot;
+  esstimator::msg::ComponentStatusSnapshot component_status_snapshot;
   component_status_snapshot.stamp = stamp;
 
   std::vector<std::string> stream_names;
@@ -2797,7 +2797,7 @@ void RosFilter<T>::publishTelemetrySnapshots(const rclcpp::Time & stamp)
 
     const auto & latest_data = stream_data->second;
 
-    robot_localization::msg::StreamTelemetry telemetry_msg;
+    esstimator::msg::StreamTelemetry telemetry_msg;
     telemetry_msg.measurement_time = latest_data.latest_measurement_time_;
     telemetry_msg.stream_name = stream_name;
     telemetry_msg.source_topic = latest_data.source_topic_;
@@ -2815,13 +2815,13 @@ void RosFilter<T>::publishTelemetrySnapshots(const rclcpp::Time & stamp)
     }
     telemetry_snapshot.streams.push_back(telemetry_msg);
 
-    robot_localization::msg::StreamBranchStatus branch_status_msg;
+    esstimator::msg::StreamBranchStatus branch_status_msg;
     branch_status_msg.stream_name = stream_name;
     branch_status_msg.source_topic = latest_data.source_topic_;
     branch_status_msg.fused = latest_data.latest_passed_;
     branch_status_snapshot.streams.push_back(branch_status_msg);
 
-    robot_localization::msg::StreamComponentStatus component_status_msg;
+    esstimator::msg::StreamComponentStatus component_status_msg;
     component_status_msg.stream_name = stream_name;
     component_status_msg.source_topic = latest_data.source_topic_;
     component_status_msg.state_labels = latest_data.latest_state_labels_;
@@ -2872,12 +2872,12 @@ void RosFilter<T>::startTuningVisualizerIfRequested()
   std::string script_path;
   try {
     script_path =
-      ament_index_cpp::get_package_prefix("robot_localization") +
-      "/lib/robot_localization/ekf_tuning_visualizer.py";
+      ament_index_cpp::get_package_prefix("esstimator") +
+      "/lib/esstimator/ekf_tuning_visualizer.py";
   } catch (const std::exception & exception) {
     RCLCPP_WARN(
       this->get_logger(),
-      "Unable to resolve robot_localization install prefix for tuning visualizer: %s",
+      "Unable to resolve esstimator install prefix for tuning visualizer: %s",
       exception.what());
     return;
   }
@@ -2997,8 +2997,8 @@ void RosFilter<T>::setPoseCallback(
 template<typename T>
 bool RosFilter<T>::setPoseSrvCallback(
   const std::shared_ptr<rmw_request_id_t>/*request_header*/,
-  const std::shared_ptr<robot_localization::srv::SetPose::Request> request,
-  std::shared_ptr<robot_localization::srv::SetPose::Response>/*response*/)
+  const std::shared_ptr<esstimator::srv::SetPose::Request> request,
+  std::shared_ptr<esstimator::srv::SetPose::Response>/*response*/)
 {
   geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg =
     std::make_shared<geometry_msgs::msg::PoseWithCovarianceStamped>(

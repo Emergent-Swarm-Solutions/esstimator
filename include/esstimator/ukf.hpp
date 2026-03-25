@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2014, 2015, 2016 Charles River Analytics, Inc.
- * Copyright (c) 2017, Locus Robotics, Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,44 +30,57 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ROBOT_LOCALIZATION__EKF_HPP_
-#define ROBOT_LOCALIZATION__EKF_HPP_
+#ifndef ROBOT_LOCALIZATION__UKF_HPP_
+#define ROBOT_LOCALIZATION__UKF_HPP_
 
 #include <vector>
-#include <robot_localization/filter_base.hpp>
+#include <esstimator/filter_base.hpp>
 
 namespace robot_localization
 {
 
 /**
- * @brief Extended Kalman filter class
+ * @brief  Unscented Kalman filter class
  *
- * Implementation of an extended Kalman filter (EKF). This class derives from
+ * Implementation of an unscenter Kalman filter (UKF). This class derives from
  * FilterBase and overrides the predict() and correct() methods in keeping with
- * the discrete time EKF algorithm.
+ * the discrete time UKF algorithm. The algorithm was derived from the UKF
+ * Wikipedia article at
+ * http://en.wikipedia.org/wiki/Kalman_filter#Unscented_Kalman_filter
+ * as well as this paper:
+ * J. J. LaViola, Jr., “A comparison of unscented and extended Kalman filtering
+ * for estimating quaternion motion,” in Proc. American Control Conf., Denver,
+ * CO, June 4–6, 2003, pp. 2435–2440 Obtained here:
+ * http://www.cs.ucf.edu/~jjl/pubs/laviola_acc2003.pdf
  */
-class Ekf : public FilterBase
+class Ukf : public FilterBase
 {
 public:
   /**
-   * @brief Constructor for the Ekf class
+   * @brief  Constructor for the Ukf class
+   *
+   * @param[in] args - Generic argument container. It is assumed that args[0]
+   * constains the alpha parameter, args[1] contains the kappa parameter, and
+   * args[2] contains the beta parameter.
    */
-  Ekf();
+  Ukf();
 
   /**
-   * @brief Destructor for the Ekf class
+   * @brief  Destructor for the Ukf class
    */
-  ~Ekf();
+  ~Ukf();
+
+  void setConstants(double alpha, double kappa, double beta);
 
   /**
-   * @brief Carries out the correct step in the predict/update cycle.
+   * @brief  Carries out the correct step in the predict/update cycle.
    *
    * @param[in] measurement - The measurement to fuse with our estimate
    */
   void correct(const Measurement & measurement) override;
 
   /**
-   * @brief Carries out the predict step in the predict/update cycle.
+   * @brief  Carries out the predict step in the predict/update cycle.
    *
    * Projects the state and error matrices forward using a model of the
    * vehicle's motion.
@@ -79,8 +91,44 @@ public:
   void predict(
     const rclcpp::Time & reference_time,
     const rclcpp::Duration & delta) override;
+
+protected:
+  /**
+   * @brief  The UKF sigma points
+   *
+   * Used to sample possible next states during prediction.
+   */
+  std::vector<Eigen::VectorXd> sigma_points_;
+
+  /**
+   * @brief  This matrix is used to generate the sigmaPoints_
+   */
+  Eigen::MatrixXd weighted_covar_sqrt_;
+
+  /**
+   * @brief  The weights associated with each sigma point when generating a new
+   * state
+   */
+  std::vector<double> state_weights_;
+
+  /**
+   * @brief  The weights associated with each sigma point when calculating a
+   * predicted estimateErrorCovariance_
+   */
+  std::vector<double> covar_weights_;
+
+  /**
+   * @brief  Used in weight generation for the sigma points
+   */
+  double lambda_;
+
+  /**
+   * @brief  Used to determine if we need to re-compute the sigma points when
+   * carrying out multiple corrections
+   */
+  bool uncorrected_;
 };
 
 }  // namespace robot_localization
 
-#endif  // ROBOT_LOCALIZATION__EKF_HPP_
+#endif  // ROBOT_LOCALIZATION__UKF_HPP_

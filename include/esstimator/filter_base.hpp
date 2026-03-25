@@ -42,10 +42,10 @@
 #include <vector>
 #include <limits>
 
-#include <robot_localization/filter_common.hpp>
-#include <robot_localization/filter_utilities.hpp>
-#include <robot_localization/measurement.hpp>
-#include <robot_localization/filter_state.hpp>
+#include <esstimator/filter_common.hpp>
+#include <esstimator/filter_utilities.hpp>
+#include <esstimator/measurement.hpp>
+#include <esstimator/filter_state.hpp>
 
 namespace robot_localization
 {

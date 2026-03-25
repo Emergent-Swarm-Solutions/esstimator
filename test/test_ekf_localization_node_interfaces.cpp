@@ -45,7 +45,7 @@
 #include <rclcpp/qos.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-#include "robot_localization/srv/set_pose.hpp"
+#include "esstimator/srv/set_pose.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 using namespace std::chrono_literals;
@@ -63,9 +63,9 @@ void resetFilter(rclcpp::Node::SharedPtr node_)
 {
   // ros2 type service-client has been implemented
   auto client =
-    node_->create_client<robot_localization::srv::SetPose>("set_pose");
+    node_->create_client<esstimator::srv::SetPose>("set_pose");
   auto setPoseRequest =
-    std::make_shared<robot_localization::srv::SetPose::Request>();
+    std::make_shared<esstimator::srv::SetPose::Request>();
 
   setPoseRequest->pose.pose.pose.orientation.w = 1;
   setPoseRequest->pose.header.frame_id = "odom";

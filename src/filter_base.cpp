@@ -38,9 +38,9 @@
 #include <vector>
 #include <algorithm>
 
-#include <robot_localization/filter_base.hpp>
-#include <robot_localization/filter_common.hpp>
-#include <robot_localization/filter_utilities.hpp>
+#include <esstimator/filter_base.hpp>
+#include <esstimator/filter_common.hpp>
+#include <esstimator/filter_utilities.hpp>
 
 namespace robot_localization
 {

@@ -26,7 +26,7 @@ depends:
 - python-catkin-pkg
 - geometry_msgs
 - rosbag
-description: The robot_localization package provides nonlinear state estimation through
+description: The esstimator package provides nonlinear state estimation through
   sensor fusion of an abritrary number of sensors.
 license: BSD
 maintainers: Tom Moore <ayrton04@gmail.com>

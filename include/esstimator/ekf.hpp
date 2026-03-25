@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2014, 2015, 2016, Charles River Analytics, Inc.
+ * Copyright (c) 2014, 2015, 2016 Charles River Analytics, Inc.
+ * Copyright (c) 2017, Locus Robotics, Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,17 +31,56 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ROBOT_LOCALIZATION__ROS_FILTER_TYPES_HPP_
-#define ROBOT_LOCALIZATION__ROS_FILTER_TYPES_HPP_
+#ifndef ROBOT_LOCALIZATION__EKF_HPP_
+#define ROBOT_LOCALIZATION__EKF_HPP_
 
-#include "robot_localization/ros_filter.hpp"
-#include "robot_localization/ekf.hpp"
-#include "robot_localization/ukf.hpp"
+#include <vector>
+#include <esstimator/filter_base.hpp>
 
 namespace robot_localization
 {
-typedef RosFilter<Ukf> RosUkf;
-typedef RosFilter<Ekf> RosEkf;
-}
 
-#endif  // ROBOT_LOCALIZATION__ROS_FILTER_TYPES_HPP_
+/**
+ * @brief Extended Kalman filter class
+ *
+ * Implementation of an extended Kalman filter (EKF). This class derives from
+ * FilterBase and overrides the predict() and correct() methods in keeping with
+ * the discrete time EKF algorithm.
+ */
+class Ekf : public FilterBase
+{
+public:
+  /**
+   * @brief Constructor for the Ekf class
+   */
+  Ekf();
+
+  /**
+   * @brief Destructor for the Ekf class
+   */
+  ~Ekf();
+
+  /**
+   * @brief Carries out the correct step in the predict/update cycle.
+   *
+   * @param[in] measurement - The measurement to fuse with our estimate
+   */
+  void correct(const Measurement & measurement) override;
+
+  /**
+   * @brief Carries out the predict step in the predict/update cycle.
+   *
+   * Projects the state and error matrices forward using a model of the
+   * vehicle's motion.
+   *
+   * @param[in] reference_time - The time at which the prediction is being made
+   * @param[in] delta - The time step over which to predict.
+   */
+  void predict(
+    const rclcpp::Time & reference_time,
+    const rclcpp::Duration & delta) override;
+};
+
+}  // namespace robot_localization
+
+#endif  // ROBOT_LOCALIZATION__EKF_HPP_

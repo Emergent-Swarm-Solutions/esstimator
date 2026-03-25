@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2018, Locus Robotics
- * Copyright (c) 2019, Steve Macenski
+ * Copyright (c) 2014, 2015, 2016, Charles River Analytics, Inc.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,23 +30,17 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <algorithm>
-#include <string>
-#include <memory>
-#include <vector>
+#ifndef ROBOT_LOCALIZATION__ROS_FILTER_TYPES_HPP_
+#define ROBOT_LOCALIZATION__ROS_FILTER_TYPES_HPP_
 
-#include <esstimator/ros_filter_types.hpp>
-#include <rclcpp/rclcpp.hpp>
+#include "esstimator/ros_filter.hpp"
+#include "esstimator/ekf.hpp"
+#include "esstimator/ukf.hpp"
 
-int main(int argc, char ** argv)
+namespace robot_localization
 {
-  rclcpp::init(argc, argv);
-  rclcpp::NodeOptions options;
-  options.arguments({"ekf_filter_node"});
-  std::shared_ptr<robot_localization::RosEkf> filter =
-    std::make_shared<robot_localization::RosEkf>(options);
-  filter->initialize();
-  rclcpp::spin(filter->get_node_base_interface());
-  rclcpp::shutdown();
-  return 0;
+typedef RosFilter<Ukf> RosUkf;
+typedef RosFilter<Ekf> RosEkf;
 }
+
+#endif  // ROBOT_LOCALIZATION__ROS_FILTER_TYPES_HPP_

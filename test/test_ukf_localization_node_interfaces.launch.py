@@ -37,7 +37,7 @@ def generate_launch_description():
 
      #*****test_ukf_localization_node_interfaces.test***** 
     ukf_node = launch_ros.actions.Node(
-            package='robot_localization',
+            package='esstimator',
             executable='ukf_node',
             name='test_ukf_localization_node_interfaces_ukf',
             output='screen',
@@ -56,7 +56,7 @@ def main(argv=sys.argv[1:]):
     ld = generate_launch_description()
 
     test1_action = ExecuteProcess(
-        cmd=[get_package_prefix('robot_localization') + '/lib/robot_localization/test_ukf_localization_node_interfaces'],
+        cmd=[get_package_prefix('esstimator') + '/lib/esstimator/test_ukf_localization_node_interfaces'],
         output='screen',
     )
 

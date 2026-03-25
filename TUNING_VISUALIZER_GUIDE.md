@@ -37,7 +37,7 @@ Examples:
 
 If you only fuse a subset of a branch, the visualizer shows only those enabled components. For example, if an IMU contributes only yaw, that branch will be labeled with the corresponding fused component list instead of pretending the full orientation triplet is active.
 
-If your IMU orientation is provided in a specific convention such as NWU, the visualizer still shows the fused orientation components as `ROLL`, `PITCH`, and `YAW`. Interpret the values according to the convention and transforms reaching `robot_localization`.
+If your IMU orientation is provided in a specific convention such as NWU, the visualizer still shows the fused orientation components as `ROLL`, `PITCH`, and `YAW`. Interpret the values according to the convention and transforms reaching `esstimator`.
 
 ## What Each Plot Means
 
@@ -187,7 +187,7 @@ If rejections are isolated single spikes:
 
 ## Threshold Guidance
 
-The rejection threshold in `robot_localization` is applied to the multivariate Mahalanobis distance for the pose, twist, or acceleration group being fused. It is not a direct per-component "3 sigma" test when several variables are fused together.
+The rejection threshold in `esstimator` is applied to the multivariate Mahalanobis distance for the pose, twist, or acceleration group being fused. It is not a direct per-component "3 sigma" test when several variables are fused together.
 
 This means:
 

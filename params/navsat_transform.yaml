@@ -7,7 +7,7 @@ navsat_transform_node:
 # important if you have use_odometry_yaw set to true. Defaults to 0.
         delay: 3.0
 
-# PLEASE READ: Like all nodes in robot_localization, this node assumes that your IMU data is reported in the ENU frame.
+# PLEASE READ: Like all nodes in esstimator, this node assumes that your IMU data is reported in the ENU frame.
 # Many IMUs report data in the NED frame, so you'll want to verify that your data is in the correct frame before using
 # it. 
 
@@ -34,7 +34,7 @@ navsat_transform_node:
         publish_filtered_gps: false
 
 # If this is true, the node ignores the IMU data and gets its heading from the odometry source (typically the
-# /odometry/filtered topic coming from one of robot_localization's state estimation nodes). BE CAREFUL when using this!
+# /odometry/filtered topic coming from one of esstimator's state estimation nodes). BE CAREFUL when using this!
 # The yaw value in your odometry source *must* be world-referenced, e.g., you cannot use your odometry source for yaw
 # if your yaw data is based purely on integrated velocities. Defaults to false.
         use_odometry_yaw: false
@@ -47,4 +47,3 @@ navsat_transform_node:
 # origin (datum) using this parameter. The fields in the parameter represent latitude and longitude in decimal degrees,
 # and heading in radians. As navsat_transform_node assumes an ENU standard, a 0 heading corresponds to east.
         datum: [55.944904, -3.186693, 0.0]
-

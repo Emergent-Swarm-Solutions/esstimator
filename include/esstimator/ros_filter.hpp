@@ -48,8 +48,8 @@
 #include <memory>
 #include <vector>
 
-#include <robot_localization/srv/set_pose.hpp>
-#include <robot_localization/srv/toggle_filter_processing.hpp>
+#include <esstimator/srv/set_pose.hpp>
+#include <esstimator/srv/toggle_filter_processing.hpp>
 
 #include <geometry_msgs/msg/accel_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
@@ -66,14 +66,14 @@
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
 #include <diagnostic_updater/diagnostic_updater.hpp>
 #include <diagnostic_updater/publisher.hpp>
-#include <robot_localization/filter_base.hpp>
-#include <robot_localization/filter_common.hpp>
-#include <robot_localization/msg/branch_status_snapshot.hpp>
-#include <robot_localization/msg/component_status_snapshot.hpp>
-#include <robot_localization/msg/filter_state_diagnostic.hpp>
-#include <robot_localization/msg/innovation_diagnostic.hpp>
-#include <robot_localization/msg/telemetry_snapshot.hpp>
-#include <robot_localization/ros_filter_utilities.hpp>
+#include <esstimator/filter_base.hpp>
+#include <esstimator/filter_common.hpp>
+#include <esstimator/msg/branch_status_snapshot.hpp>
+#include <esstimator/msg/component_status_snapshot.hpp>
+#include <esstimator/msg/filter_state_diagnostic.hpp>
+#include <esstimator/msg/innovation_diagnostic.hpp>
+#include <esstimator/msg/telemetry_snapshot.hpp>
+#include <esstimator/ros_filter_utilities.hpp>
 
 namespace robot_localization
 {
@@ -151,9 +151,9 @@ public:
   void toggleFilterProcessingCallback(
     const std::shared_ptr<rmw_request_id_t>/*request_header*/,
     const std::shared_ptr<
-      robot_localization::srv::ToggleFilterProcessing::Request> req,
+      esstimator::srv::ToggleFilterProcessing::Request> req,
     const std::shared_ptr<
-      robot_localization::srv::ToggleFilterProcessing::Response> resp);
+      esstimator::srv::ToggleFilterProcessing::Response> resp);
 
   //! @brief Callback method for receiving all acceleration (IMU) messages
   //! @param[in] msg - The ROS IMU message to take in.
@@ -318,8 +318,8 @@ public:
   //! @return true if successful, false if not
   bool setPoseSrvCallback(
     const std::shared_ptr<rmw_request_id_t> request_header,
-    const std::shared_ptr<robot_localization::srv::SetPose::Request> request,
-    std::shared_ptr<robot_localization::srv::SetPose::Response> response);
+    const std::shared_ptr<esstimator::srv::SetPose::Request> request,
+    std::shared_ptr<esstimator::srv::SetPose::Response> response);
 
   //! @brief Service callback for manually enable the filter
   //! @param[in] request - N/A
@@ -857,7 +857,7 @@ protected:
   //! processing while still publishing.
   //! Uses a robot_localization ToggleFilterProcessing service.
   //!
-  rclcpp::Service<robot_localization::srv::ToggleFilterProcessing>::SharedPtr
+  rclcpp::Service<esstimator::srv::ToggleFilterProcessing>::SharedPtr
     toggle_filter_processing_srv_;
 
   //! @brief Subscribes to the control input topic
@@ -877,7 +877,7 @@ protected:
   //! @brief Service that allows another node to change the current state and
   //! recieve a confirmation. Uses a custom SetPose service.
   //!
-  rclcpp::Service<robot_localization::srv::SetPose>::SharedPtr
+  rclcpp::Service<esstimator::srv::SetPose>::SharedPtr
     set_pose_service_;
 
   //! @brief Service that allows another node to enable the filter. Uses a
@@ -912,12 +912,12 @@ protected:
 
   //! @brief Publisher for per-measurement innovation diagnostics.
   //!
-  rclcpp::Publisher<robot_localization::msg::InnovationDiagnostic>::SharedPtr
+  rclcpp::Publisher<esstimator::msg::InnovationDiagnostic>::SharedPtr
     tuning_innovation_pub_;
 
   //! @brief Publisher for periodic filter state diagnostics.
   //!
-  rclcpp::Publisher<robot_localization::msg::FilterStateDiagnostic>::SharedPtr
+  rclcpp::Publisher<esstimator::msg::FilterStateDiagnostic>::SharedPtr
     tuning_filter_state_pub_;
 
   //! @brief Publisher for the configured stream list used by the visualizer UI.
@@ -926,17 +926,17 @@ protected:
 
   //! @brief Publisher for periodic stream telemetry snapshots.
   //!
-  rclcpp::Publisher<robot_localization::msg::TelemetrySnapshot>::SharedPtr
+  rclcpp::Publisher<esstimator::msg::TelemetrySnapshot>::SharedPtr
     tuning_telemetry_pub_;
 
   //! @brief Publisher for periodic branch fused/not-fused status snapshots.
   //!
-  rclcpp::Publisher<robot_localization::msg::BranchStatusSnapshot>::SharedPtr
+  rclcpp::Publisher<esstimator::msg::BranchStatusSnapshot>::SharedPtr
     tuning_branch_status_pub_;
 
   //! @brief Publisher for periodic component fused/not-fused status snapshots.
   //!
-  rclcpp::Publisher<robot_localization::msg::ComponentStatusSnapshot>::SharedPtr
+  rclcpp::Publisher<esstimator::msg::ComponentStatusSnapshot>::SharedPtr
     tuning_component_status_pub_;
 
   //! @brief Our filter (EKF, UKF, etc.)

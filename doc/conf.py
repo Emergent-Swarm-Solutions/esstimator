@@ -18,7 +18,7 @@ templates_path = ['.templates']
 source_suffix = '.rst'
 master_doc = 'index'
 
-project = u'robot_localization'
+project = u'esstimator'
 copyright = u'2016, Tom Moore'
 author = u'Tom Moore'
 version = catkin_package.version
@@ -110,7 +110,7 @@ html_sidebars = { '**': ['full_globaltoc.html', 'sourcelink.html', 'searchbox.ht
 #html_search_scorer = 'scorer.js'
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'robot_localizationdoc'
+htmlhelp_basename = 'esstimatordoc'
 
 # -- Options for LaTeX output ---------------------------------------------
 
@@ -132,7 +132,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'robot_localization.tex', u'robot\\_localization Documentation',
+    (master_doc, 'esstimator.tex', u'esstimator Documentation',
      u'Tom Moore', 'manual'),
 ]
 
@@ -162,7 +162,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (master_doc, 'robot_localization', u'robot_localization Documentation',
+    (master_doc, 'esstimator', u'esstimator Documentation',
      [author], 1)
 ]
 
@@ -176,8 +176,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'robot_localization', u'robot_localization Documentation',
-     author, 'robot_localization', 'One line description of project.',
+    (master_doc, 'esstimator', u'esstimator Documentation',
+     author, 'esstimator', 'One line description of project.',
      'Miscellaneous'),
 ]
 

@@ -34,7 +34,7 @@ def generate_launch_description():
     os.environ['FILE_PATH'] = str(parameters_file_dir)
 
     ekf_node = launch_ros.actions.Node(
-        package='robot_localization',
+        package='esstimator',
         executable='ekf_node',
         name='test_filter_base_diagnostics_timestamps',
         output='screen',
@@ -52,7 +52,7 @@ def main(argv=sys.argv[1:]):
     ld = generate_launch_description()
 
     test1_action = ExecuteProcess(
-        cmd=[get_package_prefix('robot_localization') + '/lib/robot_localization/test_filter_base_diagnostics_timestamps'],
+        cmd=[get_package_prefix('esstimator') + '/lib/esstimator/test_filter_base_diagnostics_timestamps'],
         output='screen',
     )
 

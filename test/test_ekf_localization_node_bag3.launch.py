@@ -35,7 +35,7 @@ def generate_launch_description():
 
 	 #*****test_ekf_localization_node_bag3.test***** 
 	launch_ros.actions.Node(
-            package='robot_localization', executable='ekf_node', name='test_ekf_localization_node_bag3_ekf',
+            package='esstimator', executable='ekf_node', name='test_ekf_localization_node_bag3_ekf',
 	    output='screen',
 	    parameters=[
                 parameters_file_path,
@@ -44,7 +44,7 @@ def generate_launch_description():
            ],
            ),
         launch_ros.actions.Node(
-            package='robot_localization', executable='test_ekf_localization_node_bag3', name='test_ekf_localization_node_bag3_pose',
+            package='esstimator', executable='test_ekf_localization_node_bag3', name='test_ekf_localization_node_bag3_pose',
             output='screen',
 	parameters=[
                 parameters_file_path,

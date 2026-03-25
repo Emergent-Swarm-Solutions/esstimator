@@ -34,8 +34,8 @@
 #include <string>
 #include <vector>
 
-#include <robot_localization/filter_common.hpp>
-#include <robot_localization/filter_utilities.hpp>
+#include <esstimator/filter_common.hpp>
+#include <esstimator/filter_utilities.hpp>
 
 std::ostream & operator<<(std::ostream & os, const Eigen::MatrixXd & mat)
 {

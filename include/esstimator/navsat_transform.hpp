@@ -44,9 +44,9 @@
 #include <string>
 #include <vector>
 
-#include <robot_localization/srv/set_datum.hpp>
-#include <robot_localization/srv/to_ll.hpp>
-#include <robot_localization/srv/from_ll.hpp>
+#include <esstimator/srv/set_datum.hpp>
+#include <esstimator/srv/to_ll.hpp>
+#include <esstimator/srv/from_ll.hpp>
 
 #include <GeographicLib/Geocentric.hpp>
 #include <GeographicLib/LocalCartesian.hpp>
@@ -86,21 +86,21 @@ private:
    * @brief Callback for the datum service
    */
   bool datumCallback(
-    const std::shared_ptr<robot_localization::srv::SetDatum::Request>
+    const std::shared_ptr<esstimator::srv::SetDatum::Request>
     request,
-    std::shared_ptr<robot_localization::srv::SetDatum::Response>);
+    std::shared_ptr<esstimator::srv::SetDatum::Response>);
 
   //! @brief Callback for the to Lat Long service
   //!
   bool toLLCallback(
-    const std::shared_ptr<robot_localization::srv::ToLL::Request> request,
-    std::shared_ptr<robot_localization::srv::ToLL::Response> response);
+    const std::shared_ptr<esstimator::srv::ToLL::Request> request,
+    std::shared_ptr<esstimator::srv::ToLL::Response> response);
 
   //! @brief Callback for the from Lat Long service
   //!
   bool fromLLCallback(
-    const std::shared_ptr<robot_localization::srv::FromLL::Request> request,
-    std::shared_ptr<robot_localization::srv::FromLL::Response> response);
+    const std::shared_ptr<esstimator::srv::FromLL::Request> request,
+    std::shared_ptr<esstimator::srv::FromLL::Response> response);
 
   /**
    * @brief Given the pose of the navsat sensor in the Cartesian frame, removes the
@@ -214,17 +214,17 @@ private:
   /**
    * @brief TimerBase for publish callback
    */
-  rclcpp::Service<robot_localization::srv::SetDatum>::SharedPtr datum_srv_;
+  rclcpp::Service<esstimator::srv::SetDatum>::SharedPtr datum_srv_;
 
   /**
    * @brief Service for to Lat Long
    */
-  rclcpp::Service<robot_localization::srv::ToLL>::SharedPtr to_ll_srv_;
+  rclcpp::Service<esstimator::srv::ToLL>::SharedPtr to_ll_srv_;
 
   /**
    * @brief Service for from Lat Long
    */
-  rclcpp::Service<robot_localization::srv::FromLL>::SharedPtr from_ll_srv_;
+  rclcpp::Service<esstimator::srv::FromLL>::SharedPtr from_ll_srv_;
 
   /**
    * @brief Navsatfix publisher

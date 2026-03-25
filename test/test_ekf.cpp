@@ -36,10 +36,10 @@
 #include <vector>
 #include <memory>
 
-#include <robot_localization/filter_base.hpp>
-#include "robot_localization/ekf.hpp"
-#include "robot_localization/ros_filter.hpp"
-#include "robot_localization/ros_filter_types.hpp"
+#include <esstimator/filter_base.hpp>
+#include "esstimator/ekf.hpp"
+#include "esstimator/ros_filter.hpp"
+#include "esstimator/ros_filter_types.hpp"
 
 using robot_localization::Ekf;
 using robot_localization::RosEkf;

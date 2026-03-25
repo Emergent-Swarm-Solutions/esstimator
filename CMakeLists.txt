@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(robot_localization)
+project(esstimator)
 
 if(NOT WIN32)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
@@ -39,7 +39,7 @@ find_package(yaml_cpp_vendor REQUIRED)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "/usr/share/cmake/geographiclib/")
 find_package(GeographicLib REQUIRED)
 
-set(library_name rl_lib)
+set(library_name esstimator_lib)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BranchStatusSnapshot.msg"
@@ -102,7 +102,7 @@ add_executable(
 )
 
 add_executable(
-  robot_localization_listener_node
+  esstimator_listener_node
   src/robot_localization_listener_node.cpp
 )
 
@@ -164,12 +164,12 @@ ament_target_dependencies(
 )
 
 target_link_libraries(
-  robot_localization_listener_node
+  esstimator_listener_node
   ${library_name}
 )
 
 ament_target_dependencies(
-  robot_localization_listener_node
+  esstimator_listener_node
   rclcpp
 )
 
@@ -337,7 +337,7 @@ install(
   navsat_transform_node
   ekf_node
   ukf_node
-  robot_localization_listener_node
+  esstimator_listener_node
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -355,7 +355,7 @@ install(
 
 install(DIRECTORY
   include/
-  DESTINATION include/${PROJECT_NAME}
+  DESTINATION include
   USE_SOURCE_PERMISSIONS)
 
 # Install params config files.

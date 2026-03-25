@@ -11,14 +11,14 @@ ukf_filter_node:
 # filter will generate new output. Defaults to 1 / frequency if not specified.
         sensor_timeout: 0.1
 
-# When true, robot_localization publishes richer tuning diagnostics on /tuning/* and attempts to
+# When true, esstimator publishes richer tuning diagnostics on /tuning/* and attempts to
 # auto-launch a matplotlib window for EKF/UKF tuning when a desktop display is available.
         tuning_visualizer_enabled: false
 
 # Rolling time window shown by the tuning visualizer, in seconds.
         tuning_visualizer_history_seconds: 60.0
 
-# When true, robot_localization publishes periodic tuning telemetry snapshots on /tuning/* for
+# When true, esstimator publishes periodic tuning telemetry snapshots on /tuning/* for
 # rosbag analysis. This includes branch-level gate and innovation metrics, per-component gate and
 # innovation values, and branch/component fused status snapshots.
         tuning_telemetry_enabled: false
@@ -51,7 +51,7 @@ ukf_filter_node:
 # effects on the performance of the node. Defaults to false if unspecified.
         debug: false
 
-# Defaults to "robot_localization_debug.txt" if unspecified. Please specify the full path.
+# Defaults to "esstimator_debug.txt" if unspecified. Please specify the full path.
         debug_out_file: /path/to/debug/file.txt
 
 # Whether we'll allow old measurements to cause a re-publication of the updated state
@@ -76,12 +76,12 @@ ukf_filter_node:
 #     1a. If your system does not have a map_frame, just remove it, and make sure "world_frame" is set to the value of
 #         odom_frame.
 # 2. If you are fusing continuous position data such as wheel encoder odometry, visual odometry, or IMU data, set
-#   "world_frame" to your odom_frame value. This is the default behavior for robot_localization's state estimation nodes.
+#   "world_frame" to your odom_frame value. This is the default behavior for esstimator's state estimation nodes.
 # 3. If you are fusing global absolute position data that is subject to discrete jumps (e.g., GPS or position updates
 # from landmark observations) then:
 #     3a. Set your "world_frame" to your map_frame value
 #     3b. MAKE SURE something else is generating the odom->base_link transform. Note that this can even be another state
-#         estimation node from robot_localization! However, that instance should *not* fuse the global data.
+#         estimation node from esstimator! However, that instance should *not* fuse the global data.
         map_frame: map              # Defaults to "map" if unspecified
         odom_frame: odom            # Defaults to "odom" if unspecified
         base_link_frame: base_link  # Defaults to "base_link" if unspecified

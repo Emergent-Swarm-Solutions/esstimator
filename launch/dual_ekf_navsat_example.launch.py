@@ -22,8 +22,8 @@ from launch.actions import DeclareLaunchArgument
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
-    robot_localization_dir = get_package_share_directory('robot_localization')
-    parameters_file_dir = os.path.join(robot_localization_dir, 'params')
+    esstimator_dir = get_package_share_directory('esstimator')
+    parameters_file_dir = os.path.join(esstimator_dir, 'params')
     parameters_file_path = os.path.join(parameters_file_dir, 'dual_ekf_navsat_example.yaml')
     os.environ['FILE_PATH'] = str(parameters_file_dir)
     return LaunchDescription([
@@ -35,7 +35,7 @@ def generate_launch_description():
 	    default_value='~/dual_ekf_navsat_example_debug.txt'),
 	
     launch_ros.actions.Node(
-            package='robot_localization', 
+            package='esstimator', 
             executable='ekf_node', 
             name='ekf_filter_node_odom',
 	        output='screen',
@@ -43,7 +43,7 @@ def generate_launch_description():
             remappings=[('odometry/filtered', 'odometry/local')]           
            ),
     launch_ros.actions.Node(
-            package='robot_localization', 
+            package='esstimator', 
             executable='ekf_node', 
             name='ekf_filter_node_map',
 	        output='screen',
@@ -51,7 +51,7 @@ def generate_launch_description():
             remappings=[('odometry/filtered', 'odometry/global')]
            ),           
     launch_ros.actions.Node(
-            package='robot_localization', 
+            package='esstimator', 
             executable='navsat_transform_node', 
             name='navsat_transform',
 	        output='screen',

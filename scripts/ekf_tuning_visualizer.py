@@ -12,8 +12,8 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 
-from robot_localization.msg import FilterStateDiagnostic
-from robot_localization.msg import InnovationDiagnostic
+from esstimator.msg import FilterStateDiagnostic
+from esstimator.msg import InnovationDiagnostic
 
 
 STATE_LABELS = [
@@ -258,7 +258,7 @@ class EkfTuningVisualizer(Node):
         manager = getattr(self.figure.canvas, "manager", None)
         if manager is not None:
             try:
-                manager.set_window_title("robot_localization EKF Tuning")
+                manager.set_window_title("esstimator EKF Tuning")
             except Exception:
                 pass
         self.figure.canvas.mpl_connect("button_press_event", self.on_click)
@@ -549,7 +549,7 @@ class EkfTuningVisualizer(Node):
             "covariance": self.selected_covariance_ax.get_position().frozen(),
         }
         self.figure.suptitle(
-            "robot_localization EKF Tuning",
+            "esstimator EKF Tuning",
             fontsize=15,
         )
         self.stream_order = stream_names

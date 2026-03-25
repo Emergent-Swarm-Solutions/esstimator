@@ -1,9 +1,9 @@
-robot_localization
-==================
+esstimator (SIQ)
+================
 
-robot_localization is a package of nonlinear state estimation nodes. The package was developed by Charles River Analytics, Inc.
+esstimator is a fork of robot_localization that provides nonlinear state estimation nodes. The original package was developed by Charles River Analytics, Inc.
 
-Please see documentation here: http://wiki.ros.org/robot_localization
+Please see the upstream robot_localization documentation here: http://wiki.ros.org/robot_localization
 
 For the new EKF/UKF tuning window and practical tuning workflow, see [TUNING_VISUALIZER_GUIDE.md](TUNING_VISUALIZER_GUIDE.md).
 
