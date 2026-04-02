@@ -1,6 +1,6 @@
 builtin_interfaces/Time stamp
 string stream_name
-bool accepted
+uint8 accepted
 float64 mahalanobis_distance
 float64 mahalanobis_threshold
 uint32[] state_indices

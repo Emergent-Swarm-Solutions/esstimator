@@ -62,6 +62,7 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <std_msgs/msg/float64.hpp>
 #include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/u_int8.hpp>
 #include <std_srvs/srv/empty.hpp>
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
 #include <diagnostic_updater/diagnostic_updater.hpp>
@@ -72,6 +73,8 @@
 #include <esstimator/msg/component_status_snapshot.hpp>
 #include <esstimator/msg/filter_state_diagnostic.hpp>
 #include <esstimator/msg/innovation_diagnostic.hpp>
+#include <esstimator/msg/stamped_float64.hpp>
+#include <esstimator/msg/stamped_u_int8.hpp>
 #include <esstimator/msg/telemetry_snapshot.hpp>
 #include <esstimator/ros_filter_utilities.hpp>
 
@@ -417,7 +420,8 @@ protected:
   //!
   void publishMahalanobisDistance(
     const std::string & stream_name,
-    const double mahalanobis_distance);
+    const double mahalanobis_distance,
+    const rclcpp::Time & stamp);
 
   //! @brief Publishes a snapshot of the filter state and covariance diagonals.
   //! @param[in] stamp - Timestamp to stamp on the diagnostic message.
@@ -426,6 +430,9 @@ protected:
   //! @brief Publishes periodic branch and component tuning telemetry snapshots.
   //! @param[in] stamp - Timestamp for the published snapshots.
   void publishTelemetrySnapshots(const rclcpp::Time & stamp);
+
+  //! @brief Ensures scalar per-stream tuning publishers exist for a stream.
+  void registerTuningScalarPublishers(const std::string & stream_name);
 
   //! @brief Publishes the list of configured input streams for the visualizer.
   void publishConfiguredStreams();
@@ -788,7 +795,7 @@ protected:
 
   //! @brief Per-stream Mahalanobis publishers.
   //!
-  std::map<std::string, rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr>
+  std::map<std::string, rclcpp::Publisher<esstimator::msg::StampedFloat64>::SharedPtr>
     mahalanobis_publishers_;
 
   //! @brief An implicitly time ordered queue of past filter states used for
@@ -938,6 +945,17 @@ protected:
   //!
   rclcpp::Publisher<esstimator::msg::ComponentStatusSnapshot>::SharedPtr
     tuning_component_status_pub_;
+
+  //! @brief Per-stream scalar publishers for PlotJuggler-friendly telemetry.
+  //!
+  std::map<std::string, rclcpp::Publisher<esstimator::msg::StampedUInt8>::SharedPtr>
+    tuning_branch_fused_publishers_;
+  std::map<std::string, rclcpp::Publisher<esstimator::msg::StampedFloat64>::SharedPtr>
+    tuning_gate_metric_publishers_;
+  std::map<std::string, rclcpp::Publisher<esstimator::msg::StampedFloat64>::SharedPtr>
+    tuning_gate_threshold_publishers_;
+  std::map<std::string, rclcpp::Publisher<esstimator::msg::StampedFloat64>::SharedPtr>
+    tuning_innovation_norm_publishers_;
 
   //! @brief Our filter (EKF, UKF, etc.)
   //!

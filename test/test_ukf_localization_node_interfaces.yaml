@@ -2,6 +2,9 @@
 test_ukf_localization_node_interfaces_ukf:
     ros__parameters:
         frequency: 30.0
+        mahalanobis_publish_rate: 20.0
+        tuning_telemetry_enabled: true
+        tuning_telemetry_publish_rate: 20.0
 
         sensor_timeout: 1000.
 

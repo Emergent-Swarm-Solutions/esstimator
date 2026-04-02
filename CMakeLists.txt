@@ -26,6 +26,7 @@ find_package(message_filters REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_eigen REQUIRED)
@@ -46,6 +47,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ComponentStatusSnapshot.msg"
   "msg/FilterStateDiagnostic.msg"
   "msg/InnovationDiagnostic.msg"
+  "msg/StampedFloat64.msg"
+  "msg/StampedUInt8.msg"
   "msg/StreamBranchStatus.msg"
   "msg/StreamComponentStatus.msg"
   "msg/StreamTelemetry.msg"
@@ -61,6 +64,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
     geometry_msgs
     geographic_msgs
     diagnostic_msgs
+    std_msgs
   ADD_LINTER_TESTS
 )
 

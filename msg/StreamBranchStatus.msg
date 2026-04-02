@@ -1,3 +1,3 @@
 string stream_name
 string source_topic
-bool fused
+uint8 fused

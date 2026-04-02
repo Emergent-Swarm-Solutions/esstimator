@@ -33,11 +33,14 @@
 #include <gtest/gtest.h>
 #include <tf2/LinearMath/Quaternion.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <iostream>
 #include <memory>
 
+#include <esstimator/msg/stamped_float64.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/twist_with_covariance_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -52,11 +55,84 @@ using namespace std::chrono_literals;
 
 nav_msgs::msg::Odometry filtered_;
 bool stateUpdated_;
+esstimator::msg::StampedFloat64 latestMahalanobisMetric_;
+esstimator::msg::StampedFloat64 latestGateMetric_;
+bool mahalanobisMetricUpdated_;
+bool gateMetricUpdated_;
 
 void filterCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
   filtered_ = *msg;
   stateUpdated_ = true;
+}
+
+void mahalanobisMetricCallback(const esstimator::msg::StampedFloat64::SharedPtr msg)
+{
+  latestMahalanobisMetric_ = *msg;
+  mahalanobisMetricUpdated_ = true;
+}
+
+void gateMetricCallback(const esstimator::msg::StampedFloat64::SharedPtr msg)
+{
+  latestGateMetric_ = *msg;
+  gateMetricUpdated_ = true;
+}
+
+bool waitForTopicType(
+  const rclcpp::Node::SharedPtr & node,
+  const std::string & topic_name,
+  const std::string & type_name)
+{
+  rclcpp::Rate loopRate(50);
+
+  for (size_t attempt = 0; attempt < 200; ++attempt) {
+    const auto topics = node->get_topic_names_and_types();
+    const auto topic = topics.find(topic_name);
+    if (topic != topics.end() &&
+      std::find(topic->second.begin(), topic->second.end(), type_name) != topic->second.end())
+    {
+      return true;
+    }
+
+    rclcpp::spin_some(node);
+    loopRate.sleep();
+  }
+
+  return false;
+}
+
+bool waitForStampedMetrics(
+  const rclcpp::Node::SharedPtr & node,
+  const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr & odomPub)
+{
+  nav_msgs::msg::Odometry odom;
+  odom.pose.pose.position.x = 20.0;
+  odom.pose.pose.position.z = -40.0;
+  odom.pose.covariance[0] = 2.0;
+  odom.pose.covariance[14] = 2.0;
+  odom.header.frame_id = "odom";
+  odom.child_frame_id = "base_link";
+
+  rclcpp::Rate loopRate(50);
+  for (size_t attempt = 0; attempt < 200; ++attempt) {
+    if (mahalanobisMetricUpdated_ && gateMetricUpdated_) {
+      return true;
+    }
+
+    odom.header.stamp = node->now();
+    odomPub->publish(odom);
+    rclcpp::spin_some(node);
+    loopRate.sleep();
+  }
+
+  rclcpp::spin_some(node);
+  return mahalanobisMetricUpdated_ && gateMetricUpdated_;
+}
+
+uint64_t stampToNanoseconds(const builtin_interfaces::msg::Time & stamp)
+{
+  return static_cast<uint64_t>(stamp.sec) * 1000000000ull +
+    static_cast<uint64_t>(stamp.nanosec);
 }
 
 void resetFilter(rclcpp::Node::SharedPtr node_)
@@ -154,6 +230,36 @@ TEST(InterfacesTest, OdomPoseBasicIO) {
   EXPECT_LT(filtered_.pose.covariance[14], 0.6);
 
   resetFilter(node_);
+}
+
+TEST(InterfacesTest, OdomPoseTelemetryTopicsAreStampedNumeric) {
+  mahalanobisMetricUpdated_ = false;
+  gateMetricUpdated_ = false;
+
+  auto node_ =
+    rclcpp::Node::make_shared("InterfacesTest_OdomPoseTelemetryTopics_testcase");
+
+  auto odomPub = node_->create_publisher<nav_msgs::msg::Odometry>(
+    "odom_input0", rclcpp::SensorDataQoS());
+
+  auto mahalanobisSub = node_->create_subscription<esstimator::msg::StampedFloat64>(
+    "/mahalanobis/odom0_pose", rclcpp::QoS(10), mahalanobisMetricCallback);
+  auto gateMetricSub = node_->create_subscription<esstimator::msg::StampedFloat64>(
+    "/tuning/gate_metric/odom0_pose", rclcpp::QoS(10), gateMetricCallback);
+
+  ASSERT_TRUE(waitForTopicType(
+      node_, "/mahalanobis/odom0_pose", "esstimator/msg/StampedFloat64"));
+  ASSERT_TRUE(waitForTopicType(
+      node_, "/tuning/gate_metric/odom0_pose", "esstimator/msg/StampedFloat64"));
+  ASSERT_TRUE(waitForStampedMetrics(node_, odomPub));
+
+  EXPECT_GT(stampToNanoseconds(latestMahalanobisMetric_.header.stamp), 0u);
+  EXPECT_GT(stampToNanoseconds(latestGateMetric_.header.stamp), 0u);
+  EXPECT_TRUE(std::isfinite(latestMahalanobisMetric_.data));
+  EXPECT_TRUE(std::isfinite(latestGateMetric_.data));
+
+  (void)mahalanobisSub;
+  (void)gateMetricSub;
 }
 
 TEST(InterfacesTest, OdomTwistBasicIO) {

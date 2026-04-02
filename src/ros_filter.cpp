@@ -36,6 +36,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -106,6 +107,87 @@ std::string stateIndexShortLabel(const size_t state_index)
     return labels[state_index];
   }
   return "STATE_" + std::to_string(state_index);
+}
+
+std::string stateIndexDisplayUnit(const size_t state_index);
+
+std::vector<std::string> stateIndicesToLabels(const std::vector<size_t> & state_indices)
+{
+  std::vector<std::string> labels;
+  labels.reserve(state_indices.size());
+  for (const size_t state_index : state_indices) {
+    labels.push_back(stateIndexShortLabel(state_index));
+  }
+  return labels;
+}
+
+std::vector<std::string> stateIndicesToUnits(const std::vector<size_t> & state_indices)
+{
+  std::vector<std::string> units;
+  units.reserve(state_indices.size());
+  for (const size_t state_index : state_indices) {
+    units.push_back(stateIndexDisplayUnit(state_index));
+  }
+  return units;
+}
+
+std::vector<double> expandDoubleValuesByStateIndex(
+  const std::vector<size_t> & configured_state_indices,
+  const std::vector<size_t> & live_state_indices,
+  const std::vector<double> & live_values,
+  const double default_value)
+{
+  std::vector<double> expanded_values(configured_state_indices.size(), default_value);
+  const size_t assignable_count = std::min(live_state_indices.size(), live_values.size());
+  for (size_t live_index = 0; live_index < assignable_count; ++live_index) {
+    const auto configured_index = std::find(
+      configured_state_indices.begin(),
+      configured_state_indices.end(),
+      live_state_indices[live_index]);
+    if (configured_index != configured_state_indices.end()) {
+      expanded_values[static_cast<size_t>(
+        std::distance(configured_state_indices.begin(), configured_index))] =
+        live_values[live_index];
+    }
+  }
+  return expanded_values;
+}
+
+std::vector<bool> expandBoolValuesByStateIndex(
+  const std::vector<size_t> & configured_state_indices,
+  const std::vector<size_t> & live_state_indices,
+  const std::vector<bool> & live_values,
+  const bool default_value)
+{
+  std::vector<bool> expanded_values(configured_state_indices.size(), default_value);
+  const size_t assignable_count = std::min(live_state_indices.size(), live_values.size());
+  for (size_t live_index = 0; live_index < assignable_count; ++live_index) {
+    const auto configured_index = std::find(
+      configured_state_indices.begin(),
+      configured_state_indices.end(),
+      live_state_indices[live_index]);
+    if (configured_index != configured_state_indices.end()) {
+      expanded_values[static_cast<size_t>(
+        std::distance(configured_state_indices.begin(), configured_index))] =
+        live_values[live_index];
+    }
+  }
+  return expanded_values;
+}
+
+uint8_t boolToUint8(const bool value)
+{
+  return value ? 1u : 0u;
+}
+
+std::vector<uint8_t> boolVectorToUint8Vector(const std::vector<bool> & values)
+{
+  std::vector<uint8_t> converted_values;
+  converted_values.reserve(values.size());
+  for (const bool value : values) {
+    converted_values.push_back(boolToUint8(value));
+  }
+  return converted_values;
 }
 
 bool stateIndexIsAngular(const size_t state_index)
@@ -245,6 +327,10 @@ RosFilter<T>::~RosFilter()
   tuning_telemetry_pub_.reset();
   tuning_branch_status_pub_.reset();
   tuning_component_status_pub_.reset();
+  tuning_branch_fused_publishers_.clear();
+  tuning_gate_metric_publishers_.clear();
+  tuning_gate_threshold_publishers_.clear();
+  tuning_innovation_norm_publishers_.clear();
   mahalanobis_publishers_.clear();
   mahalanobis_stream_data_.clear();
   stopTuningVisualizer();
@@ -1223,7 +1309,8 @@ void RosFilter<T>::loadParams()
       std::placeholders::_3,
       std::placeholders::_4,
       std::placeholders::_5));
-  if (tuning_visualizer_enabled_) {
+  // Telemetry snapshots reuse the innovation callback to populate per-component data.
+  if (tuning_visualizer_enabled_ || tuning_telemetry_enabled_) {
     filter_.setInnovationResultCallback(std::bind(
         &RosFilter<T>::handleInnovationResult,
         this,
@@ -2533,7 +2620,7 @@ void RosFilter<T>::handleMahalanobisResult(
       ", passed=" << std::boolalpha << passed << "\n");
 
   if (!passed) {
-    publishMahalanobisDistance(stream_name, mahalanobis_distance);
+    publishMahalanobisDistance(stream_name, mahalanobis_distance, measurement_time);
   }
 }
 
@@ -2601,7 +2688,7 @@ void RosFilter<T>::handleInnovationResult(
   esstimator::msg::InnovationDiagnostic diagnostic_msg;
   diagnostic_msg.stamp = result.measurement_time_;
   diagnostic_msg.stream_name = result.topic_name_;
-  diagnostic_msg.accepted = result.passed_;
+  diagnostic_msg.accepted = boolToUint8(result.passed_);
   diagnostic_msg.mahalanobis_distance = result.mahalanobis_distance_;
   diagnostic_msg.mahalanobis_threshold = result.mahalanobis_threshold_;
   diagnostic_msg.state_indices.reserve(result.state_indices_.size());
@@ -2666,8 +2753,12 @@ void RosFilter<T>::registerMahalanobisStream(
     publisher_options.qos_overriding_options =
       rclcpp::QosOverridingOptions::with_default_policies();
     mahalanobis_publishers_[stream_name] =
-      this->create_publisher<std_msgs::msg::Float64>(
+      this->create_publisher<esstimator::msg::StampedFloat64>(
       "mahalanobis/" + stream_name, rclcpp::QoS(10), publisher_options);
+  }
+
+  if (tuning_telemetry_enabled_) {
+    registerTuningScalarPublishers(stream_name);
   }
 }
 
@@ -2713,13 +2804,46 @@ void RosFilter<T>::publishConfiguredStreams()
 }
 
 template<typename T>
+void RosFilter<T>::registerTuningScalarPublishers(const std::string & stream_name)
+{
+  rclcpp::PublisherOptions publisher_options;
+  publisher_options.qos_overriding_options =
+    rclcpp::QosOverridingOptions::with_default_policies();
+
+  if (tuning_branch_fused_publishers_.count(stream_name) == 0) {
+    tuning_branch_fused_publishers_[stream_name] =
+      this->create_publisher<esstimator::msg::StampedUInt8>(
+      "tuning/branch_fused/" + stream_name, rclcpp::QoS(10), publisher_options);
+  }
+
+  if (tuning_gate_metric_publishers_.count(stream_name) == 0) {
+    tuning_gate_metric_publishers_[stream_name] =
+      this->create_publisher<esstimator::msg::StampedFloat64>(
+      "tuning/gate_metric/" + stream_name, rclcpp::QoS(10), publisher_options);
+  }
+
+  if (tuning_gate_threshold_publishers_.count(stream_name) == 0) {
+    tuning_gate_threshold_publishers_[stream_name] =
+      this->create_publisher<esstimator::msg::StampedFloat64>(
+      "tuning/gate_threshold/" + stream_name, rclcpp::QoS(10), publisher_options);
+  }
+
+  if (tuning_innovation_norm_publishers_.count(stream_name) == 0) {
+    tuning_innovation_norm_publishers_[stream_name] =
+      this->create_publisher<esstimator::msg::StampedFloat64>(
+      "tuning/innovation_norm/" + stream_name, rclcpp::QoS(10), publisher_options);
+  }
+}
+
+template<typename T>
 void RosFilter<T>::publishAllMahalanobisDistances()
 {
   for (const auto & stream_data : mahalanobis_stream_data_) {
     if (stream_data.second.has_value_) {
       publishMahalanobisDistance(
         stream_data.first,
-        stream_data.second.latest_distance_);
+        stream_data.second.latest_distance_,
+        stream_data.second.latest_measurement_time_);
     }
   }
 }
@@ -2727,7 +2851,8 @@ void RosFilter<T>::publishAllMahalanobisDistances()
 template<typename T>
 void RosFilter<T>::publishMahalanobisDistance(
   const std::string & stream_name,
-  const double mahalanobis_distance)
+  const double mahalanobis_distance,
+  const rclcpp::Time & stamp)
 {
   auto publisher = mahalanobis_publishers_.find(stream_name);
   if (publisher == mahalanobis_publishers_.end()) {
@@ -2738,7 +2863,8 @@ void RosFilter<T>::publishMahalanobisDistance(
     return;
   }
 
-  std_msgs::msg::Float64 mahalanobis_msg;
+  esstimator::msg::StampedFloat64 mahalanobis_msg;
+  mahalanobis_msg.header.stamp = stamp;
   mahalanobis_msg.data = mahalanobis_distance;
   publisher->second->publish(mahalanobis_msg);
 }
@@ -2776,61 +2902,161 @@ void RosFilter<T>::publishTelemetrySnapshots(const rclcpp::Time & stamp)
   esstimator::msg::ComponentStatusSnapshot component_status_snapshot;
   component_status_snapshot.stamp = stamp;
 
-  std::vector<std::string> stream_names;
-  stream_names.reserve(mahalanobis_stream_data_.size());
+  std::vector<std::string> active_stream_names;
+  std::vector<std::string> configured_stream_names;
+  active_stream_names.reserve(mahalanobis_stream_data_.size());
+  configured_stream_names.reserve(mahalanobis_stream_data_.size());
   for (const auto & stream_data : mahalanobis_stream_data_) {
+    configured_stream_names.push_back(stream_data.first);
     if (stream_data.second.has_value_) {
-      stream_names.push_back(stream_data.first);
+      active_stream_names.push_back(stream_data.first);
     }
   }
-  std::sort(stream_names.begin(), stream_names.end());
+  std::sort(active_stream_names.begin(), active_stream_names.end());
+  std::sort(configured_stream_names.begin(), configured_stream_names.end());
 
-  telemetry_snapshot.streams.reserve(stream_names.size());
-  branch_status_snapshot.streams.reserve(stream_names.size());
-  component_status_snapshot.streams.reserve(stream_names.size());
+  telemetry_snapshot.streams.reserve(active_stream_names.size());
+  branch_status_snapshot.streams.reserve(configured_stream_names.size());
+  component_status_snapshot.streams.reserve(configured_stream_names.size());
 
-  for (const auto & stream_name : stream_names) {
+  for (const auto & stream_name : active_stream_names) {
     const auto stream_data = mahalanobis_stream_data_.find(stream_name);
     if (stream_data == mahalanobis_stream_data_.end()) {
       continue;
     }
 
     const auto & latest_data = stream_data->second;
+    const std::vector<size_t> & telemetry_state_indices =
+      latest_data.configured_state_indices_.empty() ?
+      latest_data.latest_state_indices_ :
+      latest_data.configured_state_indices_;
+    const std::vector<std::string> telemetry_state_labels =
+      stateIndicesToLabels(telemetry_state_indices);
+    const std::vector<std::string> telemetry_component_units =
+      latest_data.configured_state_indices_.empty() ?
+      latest_data.latest_component_units_ :
+      stateIndicesToUnits(telemetry_state_indices);
+    const std::vector<double> telemetry_component_gate_metrics =
+      latest_data.configured_state_indices_.empty() ?
+      latest_data.latest_component_gate_metrics_ :
+      expandDoubleValuesByStateIndex(
+      telemetry_state_indices,
+      latest_data.latest_state_indices_,
+      latest_data.latest_component_gate_metrics_,
+      std::numeric_limits<double>::quiet_NaN());
+    const std::vector<double> telemetry_component_innovations =
+      latest_data.configured_state_indices_.empty() ?
+      latest_data.latest_component_innovations_ :
+      expandDoubleValuesByStateIndex(
+      telemetry_state_indices,
+      latest_data.latest_state_indices_,
+      latest_data.latest_component_innovations_,
+      std::numeric_limits<double>::quiet_NaN());
 
     esstimator::msg::StreamTelemetry telemetry_msg;
     telemetry_msg.measurement_time = latest_data.latest_measurement_time_;
     telemetry_msg.stream_name = stream_name;
     telemetry_msg.source_topic = latest_data.source_topic_;
-    telemetry_msg.fused = latest_data.latest_passed_;
+    telemetry_msg.fused = boolToUint8(latest_data.latest_passed_);
     telemetry_msg.gate_metric = latest_data.latest_distance_;
     telemetry_msg.gate_threshold = latest_data.latest_threshold_;
     telemetry_msg.innovation_norm = latest_data.latest_innovation_norm_;
-    telemetry_msg.state_labels = latest_data.latest_state_labels_;
-    telemetry_msg.component_units = latest_data.latest_component_units_;
-    telemetry_msg.component_gate_metrics = latest_data.latest_component_gate_metrics_;
-    telemetry_msg.component_innovations = latest_data.latest_component_innovations_;
-    telemetry_msg.state_indices.reserve(latest_data.latest_state_indices_.size());
-    for (const size_t state_index : latest_data.latest_state_indices_) {
+    telemetry_msg.state_labels = telemetry_state_labels;
+    telemetry_msg.component_units = telemetry_component_units;
+    telemetry_msg.component_gate_metrics = telemetry_component_gate_metrics;
+    telemetry_msg.component_innovations = telemetry_component_innovations;
+    telemetry_msg.state_indices.reserve(telemetry_state_indices.size());
+    for (const size_t state_index : telemetry_state_indices) {
       telemetry_msg.state_indices.push_back(static_cast<uint32_t>(state_index));
     }
     telemetry_snapshot.streams.push_back(telemetry_msg);
+  }
+
+  for (const auto & stream_name : configured_stream_names) {
+    const auto stream_data = mahalanobis_stream_data_.find(stream_name);
+    if (stream_data == mahalanobis_stream_data_.end()) {
+      continue;
+    }
+
+    const auto & latest_data = stream_data->second;
+    const std::vector<size_t> & component_state_indices =
+      latest_data.configured_state_indices_.empty() ?
+      latest_data.latest_state_indices_ :
+      latest_data.configured_state_indices_;
+    const std::vector<std::string> component_state_labels =
+      stateIndicesToLabels(component_state_indices);
 
     esstimator::msg::StreamBranchStatus branch_status_msg;
     branch_status_msg.stream_name = stream_name;
     branch_status_msg.source_topic = latest_data.source_topic_;
-    branch_status_msg.fused = latest_data.latest_passed_;
+    branch_status_msg.fused =
+      boolToUint8(latest_data.has_value_ && latest_data.latest_passed_);
     branch_status_snapshot.streams.push_back(branch_status_msg);
 
     esstimator::msg::StreamComponentStatus component_status_msg;
     component_status_msg.stream_name = stream_name;
     component_status_msg.source_topic = latest_data.source_topic_;
-    component_status_msg.state_labels = latest_data.latest_state_labels_;
-    component_status_msg.fused = latest_data.latest_component_fused_;
-    component_status_msg.state_indices.reserve(latest_data.latest_state_indices_.size());
-    for (const size_t state_index : latest_data.latest_state_indices_) {
+    component_status_msg.state_labels = component_state_labels;
+    if (latest_data.configured_state_indices_.empty() &&
+      latest_data.latest_component_fused_.size() == component_state_indices.size())
+    {
+      component_status_msg.fused =
+        boolVectorToUint8Vector(latest_data.latest_component_fused_);
+    } else {
+      component_status_msg.fused = boolVectorToUint8Vector(
+        expandBoolValuesByStateIndex(
+          component_state_indices,
+          latest_data.latest_state_indices_,
+          latest_data.latest_component_fused_,
+          false));
+    }
+    component_status_msg.state_indices.reserve(component_state_indices.size());
+    for (const size_t state_index : component_state_indices) {
       component_status_msg.state_indices.push_back(static_cast<uint32_t>(state_index));
     }
     component_status_snapshot.streams.push_back(component_status_msg);
+
+    registerTuningScalarPublishers(stream_name);
+    const rclcpp::Time scalar_stamp =
+      latest_data.has_value_ ? latest_data.latest_measurement_time_ : stamp;
+
+    auto fused_publisher = tuning_branch_fused_publishers_.find(stream_name);
+    if (fused_publisher != tuning_branch_fused_publishers_.end()) {
+      esstimator::msg::StampedUInt8 fused_msg;
+      fused_msg.header.stamp = scalar_stamp;
+      fused_msg.data = boolToUint8(latest_data.has_value_ && latest_data.latest_passed_);
+      fused_publisher->second->publish(fused_msg);
+    }
+
+    auto gate_metric_publisher = tuning_gate_metric_publishers_.find(stream_name);
+    if (gate_metric_publisher != tuning_gate_metric_publishers_.end()) {
+      esstimator::msg::StampedFloat64 gate_metric_msg;
+      gate_metric_msg.header.stamp = scalar_stamp;
+      gate_metric_msg.data = latest_data.has_value_ ?
+        latest_data.latest_distance_ :
+        std::numeric_limits<double>::quiet_NaN();
+      gate_metric_publisher->second->publish(gate_metric_msg);
+    }
+
+    auto gate_threshold_publisher = tuning_gate_threshold_publishers_.find(stream_name);
+    if (gate_threshold_publisher != tuning_gate_threshold_publishers_.end()) {
+      esstimator::msg::StampedFloat64 gate_threshold_msg;
+      gate_threshold_msg.header.stamp = scalar_stamp;
+      gate_threshold_msg.data = latest_data.has_value_ ?
+        latest_data.latest_threshold_ :
+        std::numeric_limits<double>::quiet_NaN();
+      gate_threshold_publisher->second->publish(gate_threshold_msg);
+    }
+
+    auto innovation_norm_publisher = tuning_innovation_norm_publishers_.find(stream_name);
+    if (innovation_norm_publisher != tuning_innovation_norm_publishers_.end()) {
+      esstimator::msg::StampedFloat64 innovation_norm_msg;
+      innovation_norm_msg.header.stamp = scalar_stamp;
+      innovation_norm_msg.data = latest_data.has_value_ ?
+        latest_data.latest_innovation_norm_ :
+        std::numeric_limits<double>::quiet_NaN();
+      innovation_norm_publisher->second->publish(innovation_norm_msg);
+    }
   }
 
   if (tuning_telemetry_pub_) {

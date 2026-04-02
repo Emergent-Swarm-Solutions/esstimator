@@ -1,7 +1,7 @@
 builtin_interfaces/Time measurement_time
 string stream_name
 string source_topic
-bool fused
+uint8 fused
 float64 gate_metric
 float64 gate_threshold
 float64 innovation_norm
